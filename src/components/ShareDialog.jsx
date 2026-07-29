@@ -34,13 +34,13 @@ export default function ShareDialog({ canvas, currentUser, onClose, onChanged })
 
     onChanged();
     setSending(true);
-    const invite = await sendShareInvite({
+    await sendShareInvite({
       canvasTitle: canvas.title,
       recipientEmail: email,
       fromEmail: currentUser.email,
     });
     setSending(false);
-    setStatus({ email: email.trim().toLowerCase(), delivered: invite.delivered });
+    setStatus({ email: email.trim().toLowerCase() });
     setEmail('');
   }
 
@@ -95,11 +95,9 @@ export default function ShareDialog({ canvas, currentUser, onClose, onChanged })
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mt-2 overflow-hidden rounded-xl border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-[12px] leading-snug text-amber-700"
+              className="mt-2 overflow-hidden text-[12.5px] text-accent"
             >
-              Access granted to <strong>{status.email}</strong>. No email was sent — that
-              needs a mail backend. They’ll see it under “Shared with you” when they sign
-              in with that address in this browser.
+              ✓ {status.email} now has access.
             </motion.p>
           )}
         </AnimatePresence>
@@ -143,6 +141,10 @@ export default function ShareDialog({ canvas, currentUser, onClose, onChanged })
             )}
           </div>
         </div>
+
+        <p className="mt-5 border-t border-black/5 pt-3 text-[11px] leading-snug text-subink/70">
+          Access is saved in this browser — no invite email is sent yet.
+        </p>
       </motion.div>
     </div>
   );
