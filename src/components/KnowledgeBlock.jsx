@@ -20,6 +20,7 @@ function KnowledgeBlock({ data, id }) {
     aiSuggested,
     isAddingChild,
     onNotesChange,
+    onLabelChange,
     onStartAddChild,
     onSubmitChild,
     onCancelChild,
@@ -29,9 +30,31 @@ function KnowledgeBlock({ data, id }) {
   const [childText, setChildText] = useState('');
   const childInputRef = useRef(null);
 
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState(label);
+  const labelInputRef = useRef(null);
+
   useEffect(() => {
     if (isAddingChild) childInputRef.current?.focus();
   }, [isAddingChild]);
+
+  useEffect(() => {
+    if (editingLabel) {
+      labelInputRef.current?.focus();
+      labelInputRef.current?.select();
+    }
+  }, [editingLabel]);
+
+  function startLabelEdit() {
+    setLabelDraft(label);
+    setEditingLabel(true);
+  }
+
+  function commitLabel() {
+    const next = labelDraft.trim();
+    if (next && next !== label) onLabelChange(id, next);
+    setEditingLabel(false);
+  }
 
   function submitChild(e) {
     e.preventDefault();
@@ -54,14 +77,32 @@ function KnowledgeBlock({ data, id }) {
     >
       {!isRoot && <Handle type="target" position={Position.Top} style={handleStyle} />}
 
-      <button
-        type="button"
-        onClick={() => onDelete(id)}
-        title="Delete"
-        className="nodrag absolute right-2.5 top-2.5 hidden h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-black/5 hover:text-ink group-hover:flex"
-      >
-        ×
-      </button>
+      <div className="nodrag absolute right-2 top-2.5 hidden items-center gap-0.5 group-hover:flex">
+        <button
+          type="button"
+          onClick={startLabelEdit}
+          title="Rename"
+          className="flex h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-black/5 hover:text-ink"
+        >
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M11.5 2.5l2 2-7.5 7.5-2.5.5.5-2.5 7.5-7.5z"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
+        <button
+          type="button"
+          onClick={() => onDelete(id)}
+          title="Delete"
+          className="flex h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-black/5 hover:text-ink"
+        >
+          ×
+        </button>
+      </div>
 
       {aiSuggested && (
         <span className="mb-1 inline-block rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-accent">
@@ -69,7 +110,30 @@ function KnowledgeBlock({ data, id }) {
         </span>
       )}
 
-      <p className="truncate pr-5 text-[15px] font-semibold leading-tight text-ink">{label}</p>
+      {editingLabel ? (
+        <input
+          ref={labelInputRef}
+          value={labelDraft}
+          onChange={(e) => setLabelDraft(e.target.value)}
+          onBlur={commitLabel}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commitLabel();
+            }
+            if (e.key === 'Escape') setEditingLabel(false);
+          }}
+          className="nodrag w-full rounded-lg border border-accent/40 bg-white px-2 py-1 text-[15px] font-semibold leading-tight text-ink focus:outline-none focus:ring-2 focus:ring-accent/15"
+        />
+      ) : (
+        <p
+          onDoubleClick={startLabelEdit}
+          title="Double-click to rename"
+          className="truncate pr-10 text-[15px] font-semibold leading-tight text-ink"
+        >
+          {label}
+        </p>
+      )}
 
       <textarea
         value={notes}
