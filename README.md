@@ -30,13 +30,18 @@ Get a key from the [OpenAI dashboard](https://platform.openai.com/api-keys).
 
 With a key set:
 
-- Creating a block fetches a short summary plus suggested sub-topics, so it
-  arrives populated instead of blank.
+- **Make a graph** (the button inside the search bar) generates a whole
+  multi-level graph for one topic in a single click: the root with a summary,
+  up to 5 branches each with their own summary, and up to 3 sub-topics under
+  each branch. It's one undo step, so ⌘Z removes the whole thing.
+- Pressing **Enter** instead adds just one block, which still fetches its own
+  summary and suggested sub-topics.
 - **Fill my knowledge** reviews each root topic's notes, flags factual errors,
   fills empty notes, and suggests sub-topics you're missing.
 
-Without one, the toolbar button reads "(no key)" and both paths insert
-placeholder text.
+Without a key, "Make a graph" is disabled (hover it for why), the toolbar
+button reads "(no key)", and Fill inserts placeholder text. Enter still works —
+it just adds an empty block.
 
 ### How the key is kept safe
 

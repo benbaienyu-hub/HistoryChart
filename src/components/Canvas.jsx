@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import ReactFlow, { Background, BackgroundVariant, Controls, MiniMap } from 'reactflow';
 import { useNodesState, useEdgesState } from 'reactflow';
 import KnowledgeBlock from './KnowledgeBlock';
@@ -53,6 +54,11 @@ function styleEdge(edge) {
 function makeEdge(sourceId, targetId) {
   return styleEdge({ id: `e-${sourceId}-${targetId}`, source: sourceId, target: targetId });
 }
+
+// How much graph "Make a graph" generates. One request per root plus one per
+// branch, so this is 1 + MAX_BRANCHES requests — keep it modest.
+const MAX_BRANCHES = 5;
+const MAX_LEAVES_PER_BRANCH = 3;
 
 function getDescendantIds(id, nodesList) {
   const direct = nodesList.filter((n) => n.data.parentId === id).map((n) => n.id);
@@ -127,6 +133,7 @@ export default function Canvas({ user, canvasId, onExit }) {
   const [editingRelation, setEditingRelation] = useState(null);
   const [studying, setStudying] = useState(false);
   const [aiReady, setAiReady] = useState(false);
+  const [graphProgress, setGraphProgress] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -162,7 +169,10 @@ export default function Canvas({ user, canvasId, onExit }) {
         requestAnimationFrame(run);
         return;
       }
-      instance.fitView({ padding: 0.3, maxZoom: 1, duration: 400 });
+      // minZoom keeps text legible: a wide generated graph would otherwise
+      // fit-to-screen at ~0.3 and become unreadable. Past that floor it
+      // overflows and the user pans (or uses the minimap) instead.
+      instance.fitView({ padding: 0.25, minZoom: 0.55, maxZoom: 1, duration: 400 });
     };
     requestAnimationFrame(run);
   }, []);
@@ -345,30 +355,39 @@ export default function Canvas({ user, canvasId, onExit }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [undo, redo]);
 
+  const makeNode = useCallback(
+    ({ id, x, y, label, parentId, extra = {} }) => ({
+      id,
+      type: 'knowledge',
+      position: { x, y },
+      data: {
+        ...NEW_BLOCK_FIELDS,
+        label,
+        parentId,
+        isRoot: parentId === null,
+        ...extra,
+        ...stable,
+      },
+    }),
+    [stable]
+  );
+
+  function nextRootX() {
+    const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
+    return roots.length ? Math.max(...roots.map((r) => r.position.x)) + ROOT_SPACING : 60;
+  }
+
   function addRootBlock(rawLabel) {
     const label = rawLabel.trim();
     if (!label) return;
     pushHistory();
 
-    const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
-    const newX = roots.length ? Math.max(...roots.map((r) => r.position.x)) + ROOT_SPACING : 60;
+    const newX = nextRootX();
     const newId = crypto.randomUUID();
 
     setNodes((prev) => [
       ...prev,
-      {
-        id: newId,
-        type: 'knowledge',
-        position: { x: newX, y: 90 },
-        data: {
-          ...NEW_BLOCK_FIELDS,
-          label,
-          parentId: null,
-          isRoot: true,
-          loading: aiReady,
-          ...stable,
-        },
-      },
+      makeNode({ id: newId, x: newX, y: 90, label, parentId: null, extra: { loading: aiReady } }),
     ]);
 
     // A brand-new block arriving empty is the whole reason the canvas felt
@@ -412,6 +431,143 @@ export default function Canvas({ user, canvasId, onExit }) {
     if (!searchValue.trim()) return;
     addRootBlock(searchValue);
     setSearchValue('');
+  }
+
+  // "Make a graph": build a whole multi-level graph for one topic in a single
+  // action — root with a summary, branches with their own summaries, and a
+  // layer of leaves under each. One pushHistory() up front means the whole
+  // thing collapses to a single undo step.
+  async function handleMakeGraph() {
+    const topic = searchValue.trim();
+    if (!topic || graphProgress) return;
+
+    setSearchValue('');
+    pushHistory();
+    setGraphProgress({ done: 0, total: 1 });
+
+    const rootId = crypto.randomUUID();
+    const rootX = nextRootX();
+    setNodes((prev) => [
+      ...prev,
+      makeNode({
+        id: rootId,
+        x: rootX,
+        y: 90,
+        label: topic,
+        parentId: null,
+        extra: { loading: true },
+      }),
+    ]);
+
+    function failRoot(message) {
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === rootId ? { ...n, data: { ...n.data, loading: false, aiCorrection: message } } : n
+        )
+      );
+      setGraphProgress(null);
+    }
+
+    let root;
+    try {
+      root = await expandTopic({ topic });
+    } catch (error) {
+      failRoot(`Couldn’t build the graph: ${error.message}`);
+      return;
+    }
+
+    const branches = root.subtopics.slice(0, MAX_BRANCHES);
+    setGraphProgress({ done: 1, total: 1 + branches.length });
+
+    // Land the root's own content, then the branch shells so the user watches
+    // the graph appear rather than staring at a spinner.
+    const branchIds = branches.map(() => crypto.randomUUID());
+    setNodes((prev) => [
+      ...prev.map((n) =>
+        n.id === rootId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                loading: false,
+                notes: root.summary,
+                aiFilled: Boolean(root.summary),
+              },
+            }
+          : n
+      ),
+      ...branches.map((label, i) =>
+        makeNode({
+          id: branchIds[i],
+          x: rootX + i * CHILD_SPACING,
+          y: 90 + LEVEL_HEIGHT,
+          label,
+          parentId: rootId,
+          extra: { loading: true },
+        })
+      ),
+    ]);
+    setEdges((prev) => [...prev, ...branchIds.map((id) => makeEdge(rootId, id))]);
+
+    if (branches.length === 0) {
+      setGraphProgress(null);
+      refit();
+      return;
+    }
+
+    // Expand each branch concurrently, patching the canvas as each lands.
+    await Promise.all(
+      branches.map(async (label, i) => {
+        const branchId = branchIds[i];
+        let result;
+        try {
+          result = await expandTopic({ topic: label });
+        } catch {
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === branchId ? { ...n, data: { ...n.data, loading: false } } : n
+            )
+          );
+          setGraphProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+          return;
+        }
+
+        const leaves = result.subtopics.slice(0, MAX_LEAVES_PER_BRANCH);
+        const leafIds = leaves.map(() => crypto.randomUUID());
+
+        setNodes((prev) => [
+          ...prev.map((n) =>
+            n.id === branchId
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    loading: false,
+                    notes: result.summary,
+                    aiFilled: Boolean(result.summary),
+                  },
+                }
+              : n
+          ),
+          ...leaves.map((leafLabel, j) =>
+            makeNode({
+              id: leafIds[j],
+              x: rootX + i * CHILD_SPACING + j * 40,
+              y: 90 + LEVEL_HEIGHT * 2,
+              label: leafLabel,
+              parentId: branchId,
+            })
+          ),
+        ]);
+        setEdges((prev) => [...prev, ...leafIds.map((id) => makeEdge(branchId, id))]);
+        setGraphProgress((p) => (p ? { ...p, done: p.done + 1 } : p));
+      })
+    );
+
+    // Leaves were dropped in roughly; tidy the whole forest once at the end.
+    setNodes((prev) => autoLayout(prev));
+    setGraphProgress(null);
+    refit();
   }
 
   // Attach suggested subtopics as dashed "AI suggested" children of `parentId`,
@@ -633,7 +789,7 @@ export default function Canvas({ user, canvasId, onExit }) {
 
         <form
           onSubmit={handleSearchSubmit}
-          className="mx-auto flex w-full max-w-sm items-center gap-2 rounded-full border border-black/5 bg-black/[0.03] px-3.5 py-2"
+          className="mx-auto flex w-full max-w-md items-center gap-2 rounded-full border border-black/5 bg-black/[0.03] py-1 pl-3.5 pr-1 focus-within:border-accent/30 focus-within:bg-white/70"
         >
           <svg className="h-4 w-4 shrink-0 text-subink" viewBox="0 0 20 20" fill="none">
             <circle cx="9" cy="9" r="6.5" stroke="currentColor" strokeWidth="1.6" />
@@ -643,8 +799,26 @@ export default function Canvas({ user, canvasId, onExit }) {
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
             placeholder="Explore a topic…"
-            className="w-full bg-transparent text-[13.5px] text-ink placeholder:text-subink/70 focus:outline-none"
+            title="Enter adds a single block. “Make a graph” builds a whole branch."
+            className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink placeholder:text-subink/70 focus:outline-none"
           />
+          <motion.button
+            type="button"
+            onClick={handleMakeGraph}
+            disabled={!searchValue.trim() || !aiReady || Boolean(graphProgress)}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.97 }}
+            title={
+              aiReady
+                ? 'Generate a full multi-level graph for this topic'
+                : 'Needs an OpenAI API key — see .env.example'
+            }
+            className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-[12px] font-medium text-white shadow-[0_1px_4px_rgba(0,113,227,0.3)] transition-opacity disabled:cursor-not-allowed disabled:bg-subink/25 disabled:shadow-none"
+          >
+            {graphProgress
+              ? `Building ${graphProgress.done}/${graphProgress.total}…`
+              : '✦ Make a graph'}
+          </motion.button>
         </form>
 
         <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-black/5 bg-black/[0.03] p-0.5">
