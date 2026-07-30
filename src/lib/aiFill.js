@@ -1,8 +1,8 @@
-// Client half of the AI features. The Claude call lives server-side in
+// Client half of the AI features. The model call lives server-side in
 // server/knowledgeRoutes.js so the API key never reaches the browser; this
 // module just talks to that route.
 //
-// With no ANTHROPIC_API_KEY configured the route answers 503 and everything
+// With no OPENAI_API_KEY configured the route answers 503 and everything
 // here degrades to clearly-labelled placeholders, so the app stays usable
 // without a key instead of erroring.
 
@@ -21,8 +21,8 @@ export function isAiConfigured() {
 }
 
 const PLACEHOLDER = {
-  summary: 'Connect a Claude API key to generate a real summary here.',
-  correction: 'Connect a Claude API key to fact-check these notes.',
+  summary: 'Connect an OpenAI API key to generate a real summary here.',
+  correction: 'Connect an OpenAI API key to fact-check these notes.',
   subtopics: ['Suggested subtopic (connect AI)'],
 };
 

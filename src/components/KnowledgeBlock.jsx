@@ -247,7 +247,7 @@ function KnowledgeBlock({ data, id }) {
             transition={{ duration: 1.4, repeat: Infinity }}
             className="h-1.5 w-1.5 rounded-full bg-accent"
           />
-          Asking Claude…
+          Researching…
         </p>
       )}
 

@@ -4,11 +4,14 @@ import { knowledgeApiPlugin } from './server/knowledgeRoutes.js'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  // Load .env into process.env so the server-side Claude route can read
-  // ANTHROPIC_API_KEY. Only the server module ever touches it — it is not
+  // Load .env into process.env so the server-side route can read
+  // OPENAI_API_KEY. Only the server module ever touches it — it is not
   // exposed to the client (that would need a VITE_ prefix, which we avoid
   // deliberately so the key can't leak into the bundle).
-  Object.assign(process.env, loadEnv(mode, process.cwd(), 'ANTHROPIC_'))
+  //
+  // Note: a real environment variable wins over .env — that's Vite's
+  // precedence, not a bug. Unset a stale shell export if .env seems ignored.
+  Object.assign(process.env, loadEnv(mode, process.cwd(), 'OPENAI_'))
 
   return {
     plugins: [react(), knowledgeApiPlugin()],

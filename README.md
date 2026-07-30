@@ -26,7 +26,7 @@ cp .env.example .env
 # paste your key into .env, then restart npm run dev
 ```
 
-Get a key from the [Anthropic Console](https://console.anthropic.com/settings/keys).
+Get a key from the [OpenAI dashboard](https://platform.openai.com/api-keys).
 
 With a key set:
 
@@ -41,13 +41,19 @@ placeholder text.
 ### How the key is kept safe
 
 The key is read **only** by `server/knowledgeRoutes.js`, which runs server-side.
-It is deliberately named `ANTHROPIC_API_KEY` without Vite's `VITE_` prefix, so
-Vite will not inline it into the browser bundle. **Never rename it to
-`VITE_ANTHROPIC_API_KEY`** — that ships your key to every visitor. `.env` is
+It is deliberately named `OPENAI_API_KEY` without Vite's `VITE_` prefix, so Vite
+will not inline it into the browser bundle. **Never rename it to
+`VITE_OPENAI_API_KEY`** — that ships your key to every visitor. `.env` is
 gitignored.
 
 Note that a real environment variable takes precedence over `.env`; if
-`ANTHROPIC_API_KEY` is already exported in your shell, that value wins.
+`OPENAI_API_KEY` is already exported in your shell, that value wins.
+
+### Choosing a model
+
+The route defaults to `gpt-4o`. If your key doesn't have access to it, the app
+tells you so and you can set `OPENAI_MODEL` in `.env` to any model you do have —
+it needs to support JSON-schema structured outputs.
 
 ### Deploying
 

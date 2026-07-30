@@ -719,8 +719,8 @@ export default function Canvas({ user, canvasId, onExit }) {
           disabled={isFilling || nodes.length === 0}
           title={
             aiReady
-              ? 'Review notes with Claude and suggest what’s missing'
-              : 'No ANTHROPIC_API_KEY set — will insert placeholders. See .env.example'
+              ? 'Review notes with AI and suggest what’s missing'
+              : 'No OPENAI_API_KEY set — will insert placeholders. See .env.example'
           }
           className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         >

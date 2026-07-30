@@ -1,16 +1,18 @@
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 
-// Server-side only. The API key must never reach the browser, so every Claude
+// Server-side only. The API key must never reach the browser, so every model
 // call goes through this module — it is mounted into the Vite dev server (see
 // vite.config.js) and is deliberately framework-agnostic so the same handler
 // can back an Express route or a serverless function in production.
 
-const MODEL = 'claude-opus-5';
+// Overridable so you can change models without editing code. If this default
+// has aged out and you get a "model not found" error, set OPENAI_MODEL in .env.
+const DEFAULT_MODEL = 'gpt-4o';
 
 // Structured outputs guarantee the response parses, so the client never has to
 // cope with prose where it expected JSON. `correction` is a plain string ('' for
-// "nothing to correct") rather than a nullable — nullable schemas are the
-// fiddliest part of the structured-output spec and buy nothing here.
+// "nothing to correct") rather than a nullable — strict mode requires every
+// property in `required`, so an "absent" field isn't available to us anyway.
 const KNOWLEDGE_SCHEMA = {
   type: 'object',
   properties: {
@@ -46,7 +48,11 @@ Only populate "summary" when the notes are empty or say almost nothing. If the u
 For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas.`;
 
 function readKey() {
-  return process.env.ANTHROPIC_API_KEY?.trim() || null;
+  return process.env.OPENAI_API_KEY?.trim() || null;
+}
+
+function readModel() {
+  return process.env.OPENAI_MODEL?.trim() || DEFAULT_MODEL;
 }
 
 export function hasApiKey() {
@@ -71,37 +77,36 @@ function buildPrompt({ topic, notes, childLabels }) {
 export async function generateKnowledge({ topic, notes, childLabels }) {
   const apiKey = readKey();
   if (!apiKey) {
-    const error = new Error('ANTHROPIC_API_KEY is not set');
+    const error = new Error('OPENAI_API_KEY is not set');
     error.code = 'NO_API_KEY';
     throw error;
   }
 
-  const client = new Anthropic({ apiKey });
+  const client = new OpenAI({ apiKey });
 
-  const response = await client.beta.messages.create({
-    model: MODEL,
-    max_tokens: 16000,
-    system: SYSTEM,
-    // Server-side fallback: if Claude Opus 5's safety classifiers decline the
-    // request, the API re-runs it on the recommended fallback model in the same
-    // call rather than handing back a refusal.
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    output_config: {
-      effort: 'low',
-      format: { type: 'json_schema', schema: KNOWLEDGE_SCHEMA },
+  const completion = await client.chat.completions.create({
+    model: readModel(),
+    messages: [
+      { role: 'system', content: SYSTEM },
+      { role: 'user', content: buildPrompt({ topic, notes, childLabels }) },
+    ],
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'knowledge', strict: true, schema: KNOWLEDGE_SCHEMA },
     },
-    messages: [{ role: 'user', content: buildPrompt({ topic, notes, childLabels }) }],
   });
 
-  if (response.stop_reason === 'refusal') {
-    const error = new Error('The request was declined by safety classifiers.');
+  const message = completion.choices?.[0]?.message;
+
+  // With structured outputs the model can decline instead of answering; that
+  // arrives as a `refusal` string rather than an error.
+  if (message?.refusal) {
+    const error = new Error(message.refusal);
     error.code = 'REFUSED';
     throw error;
   }
 
-  const text = response.content.find((block) => block.type === 'text')?.text ?? '';
-  const parsed = JSON.parse(text);
+  const parsed = JSON.parse(message?.content ?? '{}');
 
   return {
     summary: (parsed.summary ?? '').trim(),
@@ -166,14 +171,26 @@ export async function handleKnowledgeRequest(req, res) {
       return;
     }
     if (error.code === 'REFUSED') {
-      send(res, 200, {
-        summary: '',
-        correction: '',
-        subtopics: [],
-        refused: true,
+      send(res, 200, { summary: '', correction: '', subtopics: [], refused: true });
+      return;
+    }
+
+    // Surface the two setup mistakes that are otherwise baffling, with the fix.
+    if (error.status === 401) {
+      console.error('[knowledge] 401 — the key in .env was rejected.');
+      send(res, 502, {
+        error: 'OpenAI rejected the API key. Check OPENAI_API_KEY in .env, then restart the dev server.',
       });
       return;
     }
+    if (error.status === 404) {
+      console.error(`[knowledge] 404 — model "${readModel()}" not available to this key.`);
+      send(res, 502, {
+        error: `Model "${readModel()}" isn't available to this key. Set OPENAI_MODEL in .env to one you have access to.`,
+      });
+      return;
+    }
+
     console.error('[knowledge] request failed:', error);
     send(res, 502, { error: error.message ?? 'Upstream request failed' });
   }
@@ -187,7 +204,7 @@ export function knowledgeApiPlugin() {
     configureServer(server) {
       server.middlewares.use('/api/knowledge', handleKnowledgeRequest);
       server.middlewares.use('/api/knowledge-status', (req, res) => {
-        send(res, 200, { configured: hasApiKey() });
+        send(res, 200, { configured: hasApiKey(), model: readModel() });
       });
     },
   };

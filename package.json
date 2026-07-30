@@ -10,8 +10,8 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.115.0",
     "framer-motion": "^12.43.0",
+    "openai": "^7.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "reactflow": "^11.11.4"
