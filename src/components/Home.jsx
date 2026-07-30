@@ -83,6 +83,12 @@ function CanvasCard({ canvas, index, onOpen, actions }) {
         {actions.readOnly && ` · from ${canvas.ownerEmail}`}
       </p>
 
+      {canvas.lastScore && (
+        <p className="mt-1 text-[11.5px] text-accent">
+          Last studied {canvas.lastScore.correct}/{canvas.lastScore.total}
+        </p>
+      )}
+
       {!actions.readOnly && (
         <div className="mt-3 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
           <button

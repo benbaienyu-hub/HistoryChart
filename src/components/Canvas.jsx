@@ -1,28 +1,55 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import ReactFlow, { Background, BackgroundVariant, Controls } from 'reactflow';
+import ReactFlow, { Background, BackgroundVariant, Controls, MiniMap } from 'reactflow';
 import { useNodesState, useEdgesState } from 'reactflow';
 import KnowledgeBlock from './KnowledgeBlock';
 import ShareDialog from './ShareDialog';
+import RelationDialog from './RelationDialog';
+import StudyMode from './StudyMode';
 import { fillKnowledge } from '../lib/aiFill';
 import { getCanvas, updateCanvas } from '../lib/canvasStore';
+import { categoryColor } from '../lib/categories';
+import { autoLayout } from '../lib/layout';
 
 const nodeTypes = { knowledge: KnowledgeBlock };
 
-const ROOT_SPACING = 330;
-const CHILD_SPACING = 290;
-const LEVEL_HEIGHT = 220;
+const ROOT_SPACING = 360;
+const CHILD_SPACING = 320;
+const LEVEL_HEIGHT = 230;
 const EDGE_STYLE = { stroke: 'rgba(0,0,0,0.15)', strokeWidth: 1.5 };
+const RELATION_EDGE_STYLE = { stroke: 'rgba(0,113,227,0.45)', strokeWidth: 1.5 };
 const HISTORY_LIMIT = 50;
 
+const NEW_BLOCK_FIELDS = {
+  notes: '',
+  date: '',
+  category: 'none',
+  unsure: false,
+  aiFilled: false,
+  aiCorrection: null,
+  aiSuggested: false,
+  isAddingChild: false,
+};
+
+// Structural (parent→child) edges and manual relation edges are stored as bare
+// data and styled here, so a reload or an undo can't lose their appearance.
+function styleEdge(edge) {
+  if (edge.data?.manual) {
+    return {
+      ...edge,
+      type: 'smoothstep',
+      animated: false,
+      style: RELATION_EDGE_STYLE,
+      labelStyle: { fill: '#0071e3', fontSize: 11, fontWeight: 500 },
+      labelBgStyle: { fill: '#ffffff', fillOpacity: 0.92 },
+      labelBgPadding: [6, 3],
+      labelBgBorderRadius: 6,
+    };
+  }
+  return { ...edge, type: 'smoothstep', animated: true, style: EDGE_STYLE };
+}
+
 function makeEdge(sourceId, targetId) {
-  return {
-    id: `e-${sourceId}-${targetId}`,
-    source: sourceId,
-    target: targetId,
-    type: 'smoothstep',
-    animated: true,
-    style: EDGE_STYLE,
-  };
+  return styleEdge({ id: `e-${sourceId}-${targetId}`, source: sourceId, target: targetId });
 }
 
 function getDescendantIds(id, nodesList) {
@@ -41,6 +68,9 @@ function serialize({ nodes, edges }) {
       data: {
         label: n.data.label,
         notes: n.data.notes,
+        date: n.data.date ?? '',
+        category: n.data.category ?? 'none',
+        unsure: Boolean(n.data.unsure),
         parentId: n.data.parentId,
         isRoot: n.data.isRoot,
         aiFilled: n.data.aiFilled,
@@ -52,9 +82,8 @@ function serialize({ nodes, edges }) {
       id: e.id,
       source: e.source,
       target: e.target,
-      type: e.type,
-      animated: e.animated,
-      style: e.style,
+      label: e.label ?? undefined,
+      data: e.data ?? undefined,
     })),
   };
 }
@@ -70,6 +99,7 @@ export default function Canvas({ user, canvasId, onExit }) {
   const stable = useRef({
     onNotesChange: (id, text) => handlersRef.current.onNotesChange(id, text),
     onLabelChange: (id, text) => handlersRef.current.onLabelChange(id, text),
+    onFieldChange: (id, patch) => handlersRef.current.onFieldChange(id, patch),
     onStartAddChild: (id) => handlersRef.current.onStartAddChild(id),
     onSubmitChild: (id, text) => handlersRef.current.onSubmitChild(id, text),
     onCancelChild: (id) => handlersRef.current.onCancelChild(id),
@@ -82,7 +112,7 @@ export default function Canvas({ user, canvasId, onExit }) {
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(hydrate(record?.nodes ?? []));
-  const [edges, setEdges, onEdgesChange] = useEdgesState(record?.edges ?? []);
+  const [edges, setEdges, onEdgesChange] = useEdgesState((record?.edges ?? []).map(styleEdge));
   const [title, setTitle] = useState(record?.title ?? 'Untitled canvas');
   const [editingTitle, setEditingTitle] = useState(false);
   const [addingChildId, setAddingChildId] = useState(null);
@@ -91,10 +121,49 @@ export default function Canvas({ user, canvasId, onExit }) {
   const [showShare, setShowShare] = useState(false);
   // Bumping this re-renders so the dialog re-reads the canvas's share list.
   const [, setShareVersion] = useState(0);
+  const [pendingRelation, setPendingRelation] = useState(null);
+  const [editingRelation, setEditingRelation] = useState(null);
+  const [studying, setStudying] = useState(false);
 
   // Always-current view of the graph, for closures that would otherwise go stale.
   const liveRef = useRef({ nodes, edges });
   liveRef.current = { nodes, edges };
+
+  // Focusing a note or title on a node whose layout position lies outside the
+  // viewport makes the browser scroll the pane — overflow:hidden still permits
+  // programmatic scrolling — which drags the minimap and zoom controls out of
+  // place and visually jerks the canvas. Snap it back whenever it happens.
+  const wrapperRef = useRef(null);
+  const flowRef = useRef(null);
+
+  // Re-frame the canvas after the graph grows, so a block added off-screen
+  // doesn't read as "nothing happened". fitView ignores nodes it hasn't
+  // measured yet, and measurement lands a frame or two after the commit, so
+  // wait for every node to have a width before framing.
+  const refit = useCallback(() => {
+    let attempts = 0;
+    const run = () => {
+      const instance = flowRef.current;
+      if (!instance) return;
+      if (!instance.getNodes().every((n) => n.width) && attempts++ < 20) {
+        requestAnimationFrame(run);
+        return;
+      }
+      instance.fitView({ padding: 0.3, maxZoom: 1, duration: 400 });
+    };
+    requestAnimationFrame(run);
+  }, []);
+
+  useEffect(() => {
+    const pane = wrapperRef.current?.querySelector('.react-flow');
+    if (!pane) return;
+    const reset = () => {
+      if (pane.scrollLeft !== 0) pane.scrollLeft = 0;
+      if (pane.scrollTop !== 0) pane.scrollTop = 0;
+    };
+    pane.addEventListener('scroll', reset, { passive: true });
+    return () => pane.removeEventListener('scroll', reset);
+  }, []);
 
   const past = useRef([]);
   const future = useRef([]);
@@ -125,7 +194,7 @@ export default function Canvas({ user, canvasId, onExit }) {
   const restore = useCallback(
     (snapshot) => {
       setNodes(hydrate(snapshot.nodes));
-      setEdges(snapshot.edges);
+      setEdges(snapshot.edges.map(styleEdge));
       setAddingChildId(null);
       coalesceKey.current = null;
     },
@@ -161,6 +230,13 @@ export default function Canvas({ user, canvasId, onExit }) {
         prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: text } } : n))
       );
     },
+    onFieldChange(id, patch) {
+      // Typing a date coalesces like notes; toggles are discrete steps.
+      pushHistory('date' in patch ? `date:${id}` : null);
+      setNodes((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))
+      );
+    },
     onStartAddChild(id) {
       setAddingChildId((prev) => (prev === id ? null : id));
     },
@@ -185,14 +261,10 @@ export default function Canvas({ user, canvasId, onExit }) {
           type: 'knowledge',
           position: { x: newX, y: parent.position.y + LEVEL_HEIGHT },
           data: {
+            ...NEW_BLOCK_FIELDS,
             label,
-            notes: '',
             parentId,
             isRoot: false,
-            aiFilled: false,
-            aiCorrection: null,
-            aiSuggested: false,
-            isAddingChild: false,
             ...stable,
           },
         },
@@ -209,6 +281,15 @@ export default function Canvas({ user, canvasId, onExit }) {
       );
     },
   };
+
+  // Re-frame once React has committed a newly added block — calling fitView
+  // inline would still be looking at the previous node set.
+  const blockCount = useRef(nodes.length);
+  useEffect(() => {
+    const grew = nodes.length > blockCount.current;
+    blockCount.current = nodes.length;
+    if (grew) refit();
+  }, [nodes.length, refit]);
 
   // Reflect which node currently has its inline add-subtopic input open.
   useEffect(() => {
@@ -267,14 +348,10 @@ export default function Canvas({ user, canvasId, onExit }) {
         type: 'knowledge',
         position: { x: newX, y: 90 },
         data: {
+          ...NEW_BLOCK_FIELDS,
           label,
-          notes: '',
           parentId: null,
           isRoot: true,
-          aiFilled: false,
-          aiCorrection: null,
-          aiSuggested: false,
-          isAddingChild: false,
           ...stable,
         },
       },
@@ -320,14 +397,11 @@ export default function Canvas({ user, canvasId, onExit }) {
             type: 'knowledge',
             position: { x: newX, y: root.position.y + LEVEL_HEIGHT },
             data: {
+              ...NEW_BLOCK_FIELDS,
               label: result.suggestedSubtopic,
-              notes: '',
               parentId: root.id,
               isRoot: false,
-              aiFilled: false,
-              aiCorrection: null,
               aiSuggested: true,
-              isAddingChild: false,
               ...stable,
             },
           },
@@ -337,6 +411,67 @@ export default function Canvas({ user, canvasId, onExit }) {
     }
 
     setIsFilling(false);
+  }
+
+  const labelOf = useCallback(
+    (id) => liveRef.current.nodes.find((n) => n.id === id)?.data.label ?? 'Block',
+    []
+  );
+
+  function handleConnect(params) {
+    const { source, target } = params;
+    if (!source || !target || source === target) return;
+
+    const duplicate = liveRef.current.edges.some(
+      (e) =>
+        e.data?.manual &&
+        ((e.source === source && e.target === target) ||
+          (e.source === target && e.target === source))
+    );
+    if (duplicate) return;
+
+    setPendingRelation({ source, target });
+  }
+
+  function saveRelation(relationLabel) {
+    const { source, target } = pendingRelation;
+    pushHistory();
+    setEdges((prev) => [
+      ...prev,
+      styleEdge({
+        id: `r-${source}-${target}-${crypto.randomUUID().slice(0, 8)}`,
+        source,
+        target,
+        label: relationLabel,
+        data: { manual: true },
+      }),
+    ]);
+    setPendingRelation(null);
+  }
+
+  function updateRelation(relationLabel) {
+    pushHistory();
+    setEdges((prev) =>
+      prev.map((e) => (e.id === editingRelation.id ? styleEdge({ ...e, label: relationLabel }) : e))
+    );
+    setEditingRelation(null);
+  }
+
+  function removeRelation() {
+    pushHistory();
+    setEdges((prev) => prev.filter((e) => e.id !== editingRelation.id));
+    setEditingRelation(null);
+  }
+
+  function handleAutoLayout() {
+    if (nodes.length === 0) return;
+    pushHistory();
+    setNodes((prev) => autoLayout(prev));
+    refit();
+  }
+
+  function handleStudyFinish({ correct, total }) {
+    updateCanvas(canvasId, { lastScore: { correct, total, at: Date.now() } });
   }
 
   if (!record) {
@@ -355,7 +490,7 @@ export default function Canvas({ user, canvasId, onExit }) {
   }
 
   return (
-    <div className="relative h-screen w-screen overflow-hidden bg-canvas">
+    <div ref={wrapperRef} className="relative h-screen w-screen overflow-hidden bg-canvas">
       <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 border-b border-black/5 bg-white/70 px-4 py-3 backdrop-blur-xl">
         <button
           type="button"
@@ -460,6 +595,25 @@ export default function Canvas({ user, canvasId, onExit }) {
           </button>
         </div>
 
+        <button
+          type="button"
+          onClick={handleAutoLayout}
+          disabled={nodes.length === 0}
+          title="Tidy up the layout"
+          className="shrink-0 rounded-full border border-black/10 px-3 py-2 text-[13px] text-subink hover:bg-black/5 hover:text-ink disabled:opacity-40"
+        >
+          Tidy
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setStudying(true)}
+          disabled={nodes.length === 0}
+          className="shrink-0 rounded-full border border-black/10 px-3 py-2 text-[13px] text-subink hover:bg-black/5 hover:text-ink disabled:opacity-40"
+        >
+          Study
+        </button>
+
         {isOwner && (
           <button
             type="button"
@@ -491,9 +645,16 @@ export default function Canvas({ user, canvasId, onExit }) {
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onConnect={handleConnect}
+        onEdgeClick={(_, edge) => {
+          if (edge.data?.manual) setEditingRelation(edge);
+        }}
         nodeTypes={nodeTypes}
+        onInit={(instance) => {
+          flowRef.current = instance;
+        }}
         fitView
-        fitViewOptions={{ padding: 0.3 }}
+        fitViewOptions={{ padding: 0.3, maxZoom: 1 }}
         minZoom={0.15}
         maxZoom={1.5}
         defaultEdgeOptions={{ type: 'smoothstep', style: EDGE_STYLE }}
@@ -504,6 +665,17 @@ export default function Canvas({ user, canvasId, onExit }) {
           showInteractive={false}
           className="rounded-xl! border! border-black/5! bg-white/85! shadow-lg! backdrop-blur-xl!"
         />
+        {nodes.length > 2 && (
+          <MiniMap
+            pannable
+            zoomable
+            nodeStrokeWidth={0}
+            nodeBorderRadius={3}
+            nodeColor={(n) => categoryColor(n.data?.category)}
+            maskColor="rgba(245,245,247,0.7)"
+            className="rounded-xl! border! border-black/5! bg-white/85! shadow-lg!"
+          />
+        )}
       </ReactFlow>
 
       {showShare && (
@@ -512,6 +684,35 @@ export default function Canvas({ user, canvasId, onExit }) {
           currentUser={user}
           onClose={() => setShowShare(false)}
           onChanged={() => setShareVersion((v) => v + 1)}
+        />
+      )}
+
+      {pendingRelation && (
+        <RelationDialog
+          sourceLabel={labelOf(pendingRelation.source)}
+          targetLabel={labelOf(pendingRelation.target)}
+          onSave={saveRelation}
+          onCancel={() => setPendingRelation(null)}
+        />
+      )}
+
+      {editingRelation && (
+        <RelationDialog
+          sourceLabel={labelOf(editingRelation.source)}
+          targetLabel={labelOf(editingRelation.target)}
+          initialLabel={editingRelation.label}
+          onSave={updateRelation}
+          onDelete={removeRelation}
+          onCancel={() => setEditingRelation(null)}
+        />
+      )}
+
+      {studying && (
+        <StudyMode
+          nodes={nodes}
+          canvasTitle={title}
+          onExit={() => setStudying(false)}
+          onFinish={handleStudyFinish}
         />
       )}
     </div>
