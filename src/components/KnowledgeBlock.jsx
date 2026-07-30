@@ -28,6 +28,7 @@ function KnowledgeBlock({ data, id }) {
     aiFilled,
     aiCorrection,
     aiSuggested,
+    loading,
     isAddingChild,
     onNotesChange,
     onLabelChange,
@@ -231,7 +232,7 @@ function KnowledgeBlock({ data, id }) {
       <textarea
         value={notes}
         onChange={(e) => onNotesChange(id, e.target.value)}
-        placeholder="Add notes…"
+        placeholder={loading ? 'Researching…' : 'Add notes…'}
         rows={3}
         className={`nodrag mt-2 w-full resize-none rounded-lg border px-2 py-1.5 text-[12.5px] leading-snug text-ink/90 placeholder:text-subink/60 focus:outline-none focus:ring-1 focus:ring-accent/30 ${
           aiFilled
@@ -239,7 +240,18 @@ function KnowledgeBlock({ data, id }) {
             : 'border-black/5 bg-black/[0.02] focus:border-accent/40'
         }`}
       />
-      {aiFilled && (
+      {loading && (
+        <p className="mt-1 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-accent">
+          <motion.span
+            animate={{ opacity: [0.35, 1, 0.35] }}
+            transition={{ duration: 1.4, repeat: Infinity }}
+            className="h-1.5 w-1.5 rounded-full bg-accent"
+          />
+          Asking Claude…
+        </p>
+      )}
+
+      {aiFilled && !loading && (
         <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-accent">
           ✨ AI-filled — edit anytime
         </p>

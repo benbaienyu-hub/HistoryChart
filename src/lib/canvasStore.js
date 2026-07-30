@@ -29,15 +29,15 @@ export function getCanvas(id) {
   return all().find((c) => c.id === id) ?? null;
 }
 
-export function createCanvas({ ownerEmail, title = 'Untitled canvas' }) {
+export function createCanvas({ ownerEmail, title = 'Untitled canvas', nodes = [], edges = [] }) {
   const now = Date.now();
   const canvas = {
     id: crypto.randomUUID(),
     title,
     ownerEmail: normalizeEmail(ownerEmail),
     sharedWith: [],
-    nodes: [],
-    edges: [],
+    nodes,
+    edges,
     createdAt: now,
     updatedAt: now,
   };

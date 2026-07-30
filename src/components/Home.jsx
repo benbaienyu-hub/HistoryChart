@@ -7,7 +7,77 @@ import {
   deleteCanvas,
   updateCanvas,
 } from '../lib/canvasStore';
+import { categoryColor } from '../lib/categories';
+import { buildTemplateGraph, listTemplates } from '../lib/templates';
 import ShareDialog from './ShareDialog';
+
+const NODE_W = 280;
+const NODE_H = 150;
+
+// A real miniature of the graph, so a card actually tells you what's inside.
+function GraphThumbnail({ nodes, edges }) {
+  if (nodes.length === 0) {
+    return (
+      <div className="flex h-[68px] items-center justify-center rounded-xl bg-canvas">
+        <span className="text-[11.5px] text-subink/60">Empty canvas</span>
+      </div>
+    );
+  }
+
+  const xs = nodes.map((n) => n.position.x);
+  const ys = nodes.map((n) => n.position.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const width = Math.max(...xs) + NODE_W - minX;
+  const height = Math.max(...ys) + NODE_H - minY;
+  const pad = 40;
+  const at = (n) => ({ x: n.position.x - minX, y: n.position.y - minY });
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+
+  return (
+    <div className="h-[68px] overflow-hidden rounded-xl bg-canvas">
+      <svg
+        viewBox={`${-pad} ${-pad} ${width + pad * 2} ${height + pad * 2}`}
+        preserveAspectRatio="xMidYMid meet"
+        className="h-full w-full"
+      >
+        {edges.map((e) => {
+          const source = byId.get(e.source);
+          const target = byId.get(e.target);
+          if (!source || !target) return null;
+          const a = at(source);
+          const b = at(target);
+          return (
+            <line
+              key={e.id}
+              x1={a.x + NODE_W / 2}
+              y1={a.y + NODE_H / 2}
+              x2={b.x + NODE_W / 2}
+              y2={b.y + NODE_H / 2}
+              stroke="rgba(0,0,0,0.18)"
+              strokeWidth={6}
+            />
+          );
+        })}
+        {nodes.map((n) => {
+          const p = at(n);
+          return (
+            <rect
+              key={n.id}
+              x={p.x}
+              y={p.y}
+              width={NODE_W}
+              height={NODE_H}
+              rx={24}
+              fill={categoryColor(n.data?.category)}
+              opacity={0.85}
+            />
+          );
+        })}
+      </svg>
+    </div>
+  );
+}
 
 function formatUpdated(ts) {
   const diff = Date.now() - ts;
@@ -38,18 +108,8 @@ function CanvasCard({ canvas, index, onOpen, actions }) {
       transition={{ delay: Math.min(index * 0.04, 0.24), type: 'spring', stiffness: 240, damping: 24 }}
       className="group flex flex-col rounded-2xl border border-black/5 bg-white/85 p-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-12px_rgba(0,0,0,0.12)] backdrop-blur-xl transition-shadow hover:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_16px_32px_-12px_rgba(0,0,0,0.2)]"
     >
-      <button type="button" onClick={() => onOpen(canvas.id)} className="mb-3 block text-left">
-        <div className="flex h-[68px] items-center justify-center rounded-xl bg-canvas">
-          <div className="flex items-end gap-1">
-            {[10, 20, 14, 26, 16].map((h, i) => (
-              <span
-                key={i}
-                className="w-1.5 rounded-full bg-accent/25"
-                style={{ height: h, opacity: canvas.nodes.length ? 1 : 0.35 }}
-              />
-            ))}
-          </div>
-        </div>
+      <button type="button" onClick={() => onOpen(canvas.id)} className="mb-3 block w-full text-left">
+        <GraphThumbnail nodes={canvas.nodes} edges={canvas.edges} />
       </button>
 
       {renaming ? (
@@ -137,6 +197,18 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
     onOpenCanvas(canvas.id);
   }
 
+  function handleUseTemplate(key) {
+    const graph = buildTemplateGraph(key);
+    if (!graph) return;
+    const canvas = createCanvas({
+      ownerEmail: user.email,
+      title: graph.title,
+      nodes: graph.nodes,
+      edges: graph.edges,
+    });
+    onOpenCanvas(canvas.id);
+  }
+
   function handleRename(id, title) {
     updateCanvas(id, { title });
     refresh();
@@ -194,11 +266,11 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
         </div>
 
         {owned.length === 0 ? (
-          <div className="mt-6 rounded-2xl border border-dashed border-black/10 bg-white/50 px-6 py-14 text-center">
+          <div className="mt-6 rounded-2xl border border-dashed border-black/10 bg-white/50 px-6 py-12 text-center">
             <p className="text-[14px] text-ink">No canvases yet</p>
             <p className="mx-auto mt-1 max-w-sm text-[13px] leading-snug text-subink">
-              Create one, search a topic to drop your first block, then let “Fill my knowledge”
-              check your work.
+              Start blank and search a topic to drop your first block — or open an example
+              below to see what a finished canvas looks like.
             </p>
             <button
               type="button"
@@ -221,6 +293,42 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
             ))}
           </div>
         )}
+
+        <section className="mt-12">
+          <h2 className="text-[22px] font-semibold tracking-tight text-ink">Try an example</h2>
+          <p className="mt-0.5 text-[13px] text-subink">
+            Opens a pre-built canvas you can edit, extend, or study straight away.
+          </p>
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {listTemplates().map((template, i) => {
+              const preview = buildTemplateGraph(template.key);
+              return (
+                <motion.button
+                  key={template.key}
+                  type="button"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{
+                    delay: Math.min(i * 0.04, 0.24),
+                    type: 'spring',
+                    stiffness: 240,
+                    damping: 24,
+                  }}
+                  whileHover={{ y: -2 }}
+                  onClick={() => handleUseTemplate(template.key)}
+                  className="flex flex-col rounded-2xl border border-dashed border-black/10 bg-white/60 p-4 text-left transition-colors hover:border-accent/30 hover:bg-white/85"
+                >
+                  <GraphThumbnail nodes={preview.nodes} edges={preview.edges} />
+                  <p className="mt-3 text-[14px] font-semibold text-ink">{template.title}</p>
+                  <p className="mt-0.5 text-[11.5px] leading-snug text-subink">{template.blurb}</p>
+                  <p className="mt-1.5 text-[11.5px] font-medium text-accent">
+                    Open {template.blockCount} blocks →
+                  </p>
+                </motion.button>
+              );
+            })}
+          </div>
+        </section>
 
         {shared.length > 0 && (
           <section className="mt-12">

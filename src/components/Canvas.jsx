@@ -5,10 +5,11 @@ import KnowledgeBlock from './KnowledgeBlock';
 import ShareDialog from './ShareDialog';
 import RelationDialog from './RelationDialog';
 import StudyMode from './StudyMode';
-import { fillKnowledge } from '../lib/aiFill';
+import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
 import { getCanvas, updateCanvas } from '../lib/canvasStore';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
+import { STARTER_TOPICS } from '../lib/templates';
 
 const nodeTypes = { knowledge: KnowledgeBlock };
 
@@ -28,6 +29,7 @@ const NEW_BLOCK_FIELDS = {
   aiCorrection: null,
   aiSuggested: false,
   isAddingChild: false,
+  loading: false,
 };
 
 // Structural (parent→child) edges and manual relation edges are stored as bare
@@ -124,6 +126,17 @@ export default function Canvas({ user, canvasId, onExit }) {
   const [pendingRelation, setPendingRelation] = useState(null);
   const [editingRelation, setEditingRelation] = useState(null);
   const [studying, setStudying] = useState(false);
+  const [aiReady, setAiReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    isAiConfigured().then((ready) => {
+      if (active) setAiReady(ready);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Always-current view of the graph, for closures that would otherwise go stale.
   const liveRef = useRef({ nodes, edges });
@@ -332,19 +345,19 @@ export default function Canvas({ user, canvasId, onExit }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [undo, redo]);
 
-  function handleSearchSubmit(e) {
-    e.preventDefault();
-    const label = searchValue.trim();
+  function addRootBlock(rawLabel) {
+    const label = rawLabel.trim();
     if (!label) return;
     pushHistory();
 
     const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
     const newX = roots.length ? Math.max(...roots.map((r) => r.position.x)) + ROOT_SPACING : 60;
+    const newId = crypto.randomUUID();
 
     setNodes((prev) => [
       ...prev,
       {
-        id: crypto.randomUUID(),
+        id: newId,
         type: 'knowledge',
         position: { x: newX, y: 90 },
         data: {
@@ -352,11 +365,91 @@ export default function Canvas({ user, canvasId, onExit }) {
           label,
           parentId: null,
           isRoot: true,
+          loading: aiReady,
           ...stable,
         },
       },
     ]);
+
+    // A brand-new block arriving empty is the whole reason the canvas felt
+    // dead, so populate it in the background when AI is available.
+    if (aiReady) prefillBlock(newId, label);
+  }
+
+  async function prefillBlock(nodeId, label) {
+    let result;
+    try {
+      result = await expandTopic({ topic: label });
+    } catch {
+      setNodes((prev) =>
+        prev.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n))
+      );
+      return;
+    }
+
+    setNodes((prev) =>
+      prev.map((n) =>
+        n.id === nodeId
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                loading: false,
+                // Don't clobber anything the user typed while waiting.
+                notes: n.data.notes.trim() ? n.data.notes : result.summary,
+                aiFilled: n.data.notes.trim() ? n.data.aiFilled : Boolean(result.summary),
+              },
+            }
+          : n
+      )
+    );
+
+    appendSuggestions(nodeId, result.subtopics);
+  }
+
+  function handleSearchSubmit(e) {
+    e.preventDefault();
+    if (!searchValue.trim()) return;
+    addRootBlock(searchValue);
     setSearchValue('');
+  }
+
+  // Attach suggested subtopics as dashed "AI suggested" children of `parentId`,
+  // skipping labels already on that branch.
+  function appendSuggestions(parentId, labels) {
+    if (labels.length === 0) return;
+    const parent = liveRef.current.nodes.find((n) => n.id === parentId);
+    if (!parent) return;
+
+    const siblings = liveRef.current.nodes.filter((n) => n.data.parentId === parentId);
+    const taken = new Set(siblings.map((s) => s.data.label.toLowerCase()));
+    const fresh = labels.filter((label) => !taken.has(label.toLowerCase()));
+    if (fresh.length === 0) return;
+
+    let nextX = siblings.length
+      ? Math.max(...siblings.map((s) => s.position.x)) + CHILD_SPACING
+      : parent.position.x;
+
+    const created = fresh.map((label) => {
+      const node = {
+        id: crypto.randomUUID(),
+        type: 'knowledge',
+        position: { x: nextX, y: parent.position.y + LEVEL_HEIGHT },
+        data: {
+          ...NEW_BLOCK_FIELDS,
+          label,
+          parentId,
+          isRoot: false,
+          aiSuggested: true,
+          ...stable,
+        },
+      };
+      nextX += CHILD_SPACING;
+      return node;
+    });
+
+    setNodes((prev) => [...prev, ...created]);
+    setEdges((prev) => [...prev, ...created.map((n) => makeEdge(parentId, n.id))]);
   }
 
   async function handleFillKnowledge() {
@@ -365,8 +458,27 @@ export default function Canvas({ user, canvasId, onExit }) {
     const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
 
     for (const root of roots) {
-      const childCount = liveRef.current.nodes.filter((n) => n.data.parentId === root.id).length;
-      const result = await fillKnowledge({ notes: root.data.notes, childCount });
+      const childLabels = liveRef.current.nodes
+        .filter((n) => n.data.parentId === root.id)
+        .map((n) => n.data.label);
+
+      let result;
+      try {
+        result = await fillKnowledge({
+          topic: root.data.label,
+          notes: root.data.notes,
+          childLabels,
+        });
+      } catch (error) {
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === root.id
+              ? { ...n, data: { ...n.data, aiCorrection: `Couldn’t reach AI: ${error.message}` } }
+              : n
+          )
+        );
+        continue;
+      }
 
       setNodes((prev) =>
         prev.map((n) =>
@@ -384,30 +496,7 @@ export default function Canvas({ user, canvasId, onExit }) {
         )
       );
 
-      if (result.suggestedSubtopic) {
-        const siblings = liveRef.current.nodes.filter((n) => n.data.parentId === root.id);
-        const newX = siblings.length
-          ? Math.max(...siblings.map((s) => s.position.x)) + CHILD_SPACING
-          : root.position.x;
-        const newId = crypto.randomUUID();
-        setNodes((prev) => [
-          ...prev,
-          {
-            id: newId,
-            type: 'knowledge',
-            position: { x: newX, y: root.position.y + LEVEL_HEIGHT },
-            data: {
-              ...NEW_BLOCK_FIELDS,
-              label: result.suggestedSubtopic,
-              parentId: root.id,
-              isRoot: false,
-              aiSuggested: true,
-              ...stable,
-            },
-          },
-        ]);
-        setEdges((prev) => [...prev, makeEdge(root.id, newId)]);
-      }
+      appendSuggestions(root.id, result.suggestedSubtopics);
     }
 
     setIsFilling(false);
@@ -628,15 +717,36 @@ export default function Canvas({ user, canvasId, onExit }) {
           type="button"
           onClick={handleFillKnowledge}
           disabled={isFilling || nodes.length === 0}
+          title={
+            aiReady
+              ? 'Review notes with Claude and suggest what’s missing'
+              : 'No ANTHROPIC_API_KEY set — will insert placeholders. See .env.example'
+          }
           className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {isFilling ? 'Filling…' : '✨ Fill my knowledge'}
+          {isFilling ? 'Thinking…' : '✨ Fill my knowledge'}
+          {!aiReady && <span className="ml-1.5 opacity-70">(no key)</span>}
         </button>
       </div>
 
       {nodes.length === 0 && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center px-6">
           <p className="text-[15px] text-subink">Search a topic above to start your canvas</p>
+          <p className="mt-5 text-[11px] font-medium uppercase tracking-wide text-subink/70">
+            or try one of these
+          </p>
+          <div className="pointer-events-auto mt-2.5 flex max-w-lg flex-wrap justify-center gap-2">
+            {STARTER_TOPICS.map((topic) => (
+              <button
+                key={topic}
+                type="button"
+                onClick={() => addRootBlock(topic)}
+                className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-[12.5px] text-subink transition-colors hover:border-accent/30 hover:bg-white hover:text-ink"
+              >
+                {topic}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
