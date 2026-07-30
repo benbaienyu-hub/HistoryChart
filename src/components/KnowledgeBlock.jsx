@@ -29,6 +29,9 @@ function KnowledgeBlock({ data, id }) {
     aiCorrection,
     aiSuggested,
     loading,
+    collapsed,
+    childCount = 0,
+    hiddenCount = 0,
     isAddingChild,
     onNotesChange,
     onLabelChange,
@@ -36,6 +39,7 @@ function KnowledgeBlock({ data, id }) {
     onStartAddChild,
     onSubmitChild,
     onCancelChild,
+    onToggleCollapse,
     onDelete,
   } = data;
 
@@ -289,18 +293,62 @@ function KnowledgeBlock({ data, id }) {
         )}
       </AnimatePresence>
 
-      <motion.button
-        type="button"
-        whileHover={{ scale: 1.08 }}
-        whileTap={{ scale: 0.94 }}
-        onClick={() => onStartAddChild(id)}
-        title="Add subtopic"
-        className="nodrag absolute -bottom-2.5 left-1/2 flex h-5 w-5 -translate-x-1/2 items-center justify-center rounded-full bg-accent text-white shadow-[0_2px_6px_rgba(0,113,227,0.45)]"
-      >
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-          <path d="M5 0v10M0 5h10" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-        </svg>
-      </motion.button>
+      <div className="absolute -bottom-2.5 left-1/2 flex -translate-x-1/2 items-center gap-1">
+        {childCount > 0 && (
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.06 }}
+            whileTap={{ scale: 0.94 }}
+            onClick={() => onToggleCollapse(id)}
+            title={
+              collapsed
+                ? `Expand ${hiddenCount} hidden ${hiddenCount === 1 ? 'block' : 'blocks'}`
+                : 'Collapse this branch'
+            }
+            className={`nodrag flex h-5 items-center gap-0.5 rounded-full border px-1.5 text-[10px] font-semibold tabular-nums shadow-sm ${
+              collapsed
+                ? 'border-accent bg-accent text-white'
+                : 'border-line2 bg-panel text-subink hover:text-ink'
+            }`}
+          >
+            <motion.svg
+              width="9"
+              height="9"
+              viewBox="0 0 10 10"
+              fill="none"
+              animate={{ rotate: collapsed ? -90 : 0 }}
+              transition={{ duration: 0.18 }}
+            >
+              <path
+                d="M2 3.5L5 6.5l3-3"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </motion.svg>
+            {collapsed && hiddenCount > 0 && <span>{hiddenCount}</span>}
+          </motion.button>
+        )}
+
+        <motion.button
+          type="button"
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.94 }}
+          onClick={() => onStartAddChild(id)}
+          title="Add subtopic"
+          className="nodrag flex h-5 w-5 items-center justify-center rounded-full bg-accent text-white shadow-[0_2px_6px_rgba(0,113,227,0.45)]"
+        >
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <path
+              d="M5 0v10M0 5h10"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+            />
+          </svg>
+        </motion.button>
+      </div>
 
       <Handle type="source" position={Position.Bottom} style={anchorStyle} />
     </motion.div>

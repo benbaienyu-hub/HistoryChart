@@ -73,6 +73,19 @@ import { handleKnowledgeRequest } from './server/knowledgeRoutes.js'
 app.post('/api/knowledge', handleKnowledgeRequest)
 ```
 
+## Working with a big canvas
+
+Generated graphs get wide fast, so every block with children carries a chevron
+on its bottom edge. Collapsing folds the whole subtree away and the chevron turns
+into a badge showing how many blocks are hidden. Collapses nest (folding a parent
+doesn't disturb a child's own state), survive a reload, and are a single undo
+step. Study mode still draws on collapsed blocks — folding a branch is a viewing
+choice, not a decision to stop learning it.
+
+Reloading while on a canvas reopens that canvas. The pointer is validated on
+read, so a canvas that was deleted or un-shared just drops you on the library
+instead.
+
 ## Dark mode
 
 Follows your OS by default. The sun/moon button in the header (and the canvas
@@ -92,11 +105,19 @@ hardcode white or black and both themes stay in sync.
 | `src/components/KnowledgeBlock.jsx` | A single block — title, notes, date, category, flag |
 | `src/components/StudyMode.jsx` | Flashcards generated from your notes |
 | `src/components/Home.jsx` | Canvas library sidebar (Your canvases / Shared with me / Examples) |
+| `src/lib/graph.js` | Pure tree helpers — descendants, collapse visibility |
+| `src/lib/layout.js` | Tidy-tree layout over the `parentId` forest |
+| `src/lib/deck.js` | Flashcard selection and deterministic shuffle |
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
 | `src/lib/canvasStore.js` | Canvas persistence (localStorage) |
 | `src/lib/templates.js` | Pre-built starter canvases |
+| `test/` | Vitest suite over everything in `src/lib` and the API route |
+
+The rule the `src/lib` split follows: anything with a decision in it lives in a
+module with no React import, so it can be tested directly. Components are left
+holding markup and state wiring.
 
 ## Known limitations
 
@@ -113,4 +134,9 @@ npm run dev      # dev server (serves the AI route too)
 npm run build    # production build
 npm run preview  # serve the build — no AI route, see Deploying
 npm run lint     # oxlint
+npm test         # vitest, single run
+npm run test:watch
 ```
+
+The tests never make a network call: the API-route tests blank `OPENAI_API_KEY`
+first, so they exercise the validation and no-key paths rather than OpenAI.

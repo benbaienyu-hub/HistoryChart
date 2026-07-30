@@ -2,6 +2,7 @@ import { readJSON, writeJSON } from './storage';
 import { normalizeEmail } from './auth';
 
 const CANVASES_KEY = 'historychart:canvases:v1';
+const LAST_OPEN_KEY = 'historychart:lastOpen:v1';
 
 function all() {
   return readJSON(CANVASES_KEY, []);
@@ -68,6 +69,31 @@ export function shareCanvas(id, email) {
   }
   updateCanvas(id, { sharedWith: [...(canvas.sharedWith ?? []), recipient] });
   return { ok: true };
+}
+
+// Remembering which canvas was open (per user) so a reload doesn't dump you
+// back on the library. Stored separately from the canvases themselves so a
+// stale pointer can never corrupt canvas data.
+export function rememberOpenCanvas(email, canvasId) {
+  const map = readJSON(LAST_OPEN_KEY, {});
+  if (canvasId) map[normalizeEmail(email)] = canvasId;
+  else delete map[normalizeEmail(email)];
+  writeJSON(LAST_OPEN_KEY, map);
+}
+
+// Returns the remembered id only if that canvas still exists and this user can
+// still reach it — it may have been deleted, or un-shared, since.
+export function restorableCanvasId(email) {
+  const recipient = normalizeEmail(email);
+  const id = readJSON(LAST_OPEN_KEY, {})[recipient];
+  if (!id) return null;
+
+  const canvas = getCanvas(id);
+  if (!canvas) return null;
+
+  const reachable =
+    canvas.ownerEmail === recipient || (canvas.sharedWith ?? []).includes(recipient);
+  return reachable ? id : null;
 }
 
 export function unshareCanvas(id, email) {

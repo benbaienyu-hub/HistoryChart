@@ -212,6 +212,7 @@ export function buildTemplateGraph(key) {
       aiFilled: false,
       aiCorrection: null,
       aiSuggested: false,
+      collapsed: false,
     },
   }));
 

@@ -15,5 +15,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), knowledgeApiPlugin()],
+    test: {
+      // jsdom because most of what's worth testing here talks to localStorage
+      // or document.documentElement (the theme store).
+      environment: 'jsdom',
+      include: ['test/**/*.test.js'],
+      restoreMocks: true,
+      setupFiles: ['./test/setup.js'],
+    },
   }
 })

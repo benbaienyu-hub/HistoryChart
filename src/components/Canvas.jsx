@@ -10,6 +10,7 @@ import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
 import { getCanvas, updateCanvas } from '../lib/canvasStore';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
+import { descendantIds, withVisibility } from '../lib/graph';
 import { STARTER_TOPICS } from '../lib/templates';
 import { useTheme } from '../lib/theme';
 import ThemeToggle from './ThemeToggle';
@@ -26,6 +27,7 @@ const RELATION_EDGE_STYLE = {
   strokeWidth: 1.5,
 };
 const HISTORY_LIMIT = 50;
+const SAVE_DEBOUNCE_MS = 400;
 
 const NEW_BLOCK_FIELDS = {
   notes: '',
@@ -37,6 +39,7 @@ const NEW_BLOCK_FIELDS = {
   aiSuggested: false,
   isAddingChild: false,
   loading: false,
+  collapsed: false,
 };
 
 // Structural (parent→child) edges and manual relation edges are stored as bare
@@ -66,11 +69,6 @@ function makeEdge(sourceId, targetId) {
 const MAX_BRANCHES = 5;
 const MAX_LEAVES_PER_BRANCH = 3;
 
-function getDescendantIds(id, nodesList) {
-  const direct = nodesList.filter((n) => n.data.parentId === id).map((n) => n.id);
-  return direct.reduce((acc, cid) => [...acc, cid, ...getDescendantIds(cid, nodesList)], []);
-}
-
 // Strip React callbacks and transient UI flags so a graph can be stored in
 // localStorage or pushed onto the undo stack.
 function serialize({ nodes, edges }) {
@@ -90,6 +88,7 @@ function serialize({ nodes, edges }) {
         aiFilled: n.data.aiFilled,
         aiCorrection: n.data.aiCorrection,
         aiSuggested: n.data.aiSuggested,
+        collapsed: Boolean(n.data.collapsed),
       },
     })),
     edges: edges.map((e) => ({
@@ -117,6 +116,7 @@ export default function Canvas({ user, canvasId, onExit }) {
     onStartAddChild: (id) => handlersRef.current.onStartAddChild(id),
     onSubmitChild: (id, text) => handlersRef.current.onSubmitChild(id, text),
     onCancelChild: (id) => handlersRef.current.onCancelChild(id),
+    onToggleCollapse: (id) => handlersRef.current.onToggleCollapse(id),
     onDelete: (id) => handlersRef.current.onDelete(id),
   }).current;
 
@@ -155,6 +155,10 @@ export default function Canvas({ user, canvasId, onExit }) {
       active = false;
     };
   }, []);
+
+  // What React Flow actually renders: collapsed subtrees marked hidden, plus
+  // per-node child/hidden counts for the collapse control.
+  const visible = useMemo(() => withVisibility(nodes, edges), [nodes, edges]);
 
   // Always-current view of the graph, for closures that would otherwise go stale.
   const liveRef = useRef({ nodes, edges });
@@ -306,9 +310,17 @@ export default function Canvas({ user, canvasId, onExit }) {
       setEdges((prev) => [...prev, makeEdge(parentId, newId)]);
       setAddingChildId(null);
     },
+    onToggleCollapse(id) {
+      pushHistory();
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === id ? { ...n, data: { ...n.data, collapsed: !n.data.collapsed } } : n
+        )
+      );
+    },
     onDelete(id) {
       pushHistory();
-      const removeIds = new Set([id, ...getDescendantIds(id, liveRef.current.nodes)]);
+      const removeIds = new Set([id, ...descendantIds(liveRef.current.nodes, id)]);
       setNodes((prev) => prev.filter((n) => !removeIds.has(n.id)));
       setEdges((prev) =>
         prev.filter((e) => !removeIds.has(e.source) && !removeIds.has(e.target))
@@ -337,11 +349,38 @@ export default function Canvas({ user, canvasId, onExit }) {
     );
   }, [addingChildId, setNodes]);
 
-  // Persist graph edits back to the stored canvas.
+  // Persist graph edits back to the stored canvas, debounced: writing on every
+  // keystroke means re-serializing the entire graph and a synchronous
+  // localStorage write per character, which a large canvas feels.
+  const saveTimer = useRef(null);
+  const flushSave = useCallback(() => {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (!record) return;
+    updateCanvas(canvasId, serialize(liveRef.current));
+  }, [canvasId, record]);
+
   useEffect(() => {
     if (!record) return;
-    updateCanvas(canvasId, serialize({ nodes, edges }));
-  }, [nodes, edges, canvasId, record]);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
+  }, [nodes, edges, record, flushSave]);
+
+  // A debounce must never lose the tail of someone's typing, so force a write
+  // whenever the canvas is about to stop being watched: leaving for Home
+  // (unmount), hiding the tab, or closing it.
+  useEffect(() => {
+    const flush = () => flushSave();
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flush);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flush);
+      flushSave();
+    };
+  }, [flushSave]);
 
   useEffect(() => {
     if (!record) return;
@@ -938,8 +977,8 @@ export default function Canvas({ user, canvasId, onExit }) {
       )}
 
       <ReactFlow
-        nodes={nodes}
-        edges={edges}
+        nodes={visible.nodes}
+        edges={visible.edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}

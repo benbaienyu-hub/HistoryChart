@@ -1,43 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { categoryColor, categoryLabel } from '../lib/categories';
-
-// Deterministic shuffle so a session's order doesn't reshuffle on re-render.
-function shuffle(list, seed) {
-  const out = [...list];
-  let state = seed;
-  for (let i = out.length - 1; i > 0; i--) {
-    state = (state * 1103515245 + 12345) & 0x7fffffff;
-    const j = state % (i + 1);
-    [out[i], out[j]] = [out[j], out[i]];
-  }
-  return out;
-}
-
-function buildDeck(nodes, flaggedOnly, seed) {
-  const usable = nodes.filter((n) => n.data.notes?.trim() && (!flaggedOnly || n.data.unsure));
-  return shuffle(
-    usable.map((n) => ({
-      id: n.id,
-      label: n.data.label,
-      notes: n.data.notes,
-      date: n.data.date,
-      category: n.data.category,
-      unsure: n.data.unsure,
-    })),
-    seed
-  );
-}
+import { buildDeck, flaggedCardCount } from '../lib/deck';
 
 export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
   const [seed, setSeed] = useState(1);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [restrictTo, setRestrictTo] = useState(null);
 
-  const deck = useMemo(() => {
-    const full = buildDeck(nodes, flaggedOnly, seed);
-    return restrictTo ? full.filter((c) => restrictTo.includes(c.id)) : full;
-  }, [nodes, flaggedOnly, seed, restrictTo]);
+  const deck = useMemo(
+    () => buildDeck(nodes, { flaggedOnly, seed, restrictTo }),
+    [nodes, flaggedOnly, seed, restrictTo]
+  );
 
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
@@ -45,7 +19,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
   const [gotCount, setGotCount] = useState(0);
   const [done, setDone] = useState(false);
 
-  const flaggedCount = nodes.filter((n) => n.data.unsure && n.data.notes?.trim()).length;
+  const flaggedCount = flaggedCardCount(nodes);
   const card = deck[index];
 
   const restart = useCallback((opts = {}) => {
