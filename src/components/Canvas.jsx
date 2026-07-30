@@ -11,14 +11,20 @@ import { getCanvas, updateCanvas } from '../lib/canvasStore';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
 import { STARTER_TOPICS } from '../lib/templates';
+import { useTheme } from '../lib/theme';
+import ThemeToggle from './ThemeToggle';
 
 const nodeTypes = { knowledge: KnowledgeBlock };
 
 const ROOT_SPACING = 360;
 const CHILD_SPACING = 320;
 const LEVEL_HEIGHT = 230;
-const EDGE_STYLE = { stroke: 'rgba(0,0,0,0.15)', strokeWidth: 1.5 };
-const RELATION_EDGE_STYLE = { stroke: 'rgba(0,113,227,0.45)', strokeWidth: 1.5 };
+const EDGE_STYLE = { stroke: 'var(--color-edge)', strokeWidth: 1.5 };
+const RELATION_EDGE_STYLE = {
+  stroke: 'var(--color-accent)',
+  strokeOpacity: 0.55,
+  strokeWidth: 1.5,
+};
 const HISTORY_LIMIT = 50;
 
 const NEW_BLOCK_FIELDS = {
@@ -42,8 +48,8 @@ function styleEdge(edge) {
       type: 'smoothstep',
       animated: false,
       style: RELATION_EDGE_STYLE,
-      labelStyle: { fill: '#0071e3', fontSize: 11, fontWeight: 500 },
-      labelBgStyle: { fill: '#ffffff', fillOpacity: 0.92 },
+      labelStyle: { fill: 'var(--color-accent)', fontSize: 11, fontWeight: 500 },
+      labelBgStyle: { fill: 'var(--color-panel)', fillOpacity: 0.92 },
       labelBgPadding: [6, 3],
       labelBgBorderRadius: 6,
     };
@@ -134,6 +140,11 @@ export default function Canvas({ user, canvasId, onExit }) {
   const [studying, setStudying] = useState(false);
   const [aiReady, setAiReady] = useState(false);
   const [graphProgress, setGraphProgress] = useState(null);
+  const theme = useTheme();
+  // These two React Flow props are passed to canvas/SVG attributes that
+  // don't resolve CSS variables, so pick literals per theme.
+  const dotColor = theme === 'dark' ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.12)';
+  const maskColor = theme === 'dark' ? 'rgba(23,23,26,0.72)' : 'rgba(245,245,247,0.7)';
 
   useEffect(() => {
     let active = true;
@@ -736,12 +747,12 @@ export default function Canvas({ user, canvasId, onExit }) {
 
   return (
     <div ref={wrapperRef} className="relative h-screen w-screen overflow-hidden bg-canvas">
-      <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 border-b border-black/5 bg-white/70 px-4 py-3 backdrop-blur-xl">
+      <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-4 py-3 backdrop-blur-xl">
         <button
           type="button"
           onClick={onExit}
           title="Back to home"
-          className="flex shrink-0 items-center gap-1 rounded-full px-2 py-1.5 text-[13px] text-subink hover:bg-black/5 hover:text-ink"
+          className="flex shrink-0 items-center gap-1 rounded-full px-2 py-1.5 text-[13px] text-subink hover:bg-hover hover:text-ink"
         >
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <path
@@ -767,14 +778,14 @@ export default function Canvas({ user, canvasId, onExit }) {
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === 'Escape') e.currentTarget.blur();
             }}
-            className="w-[180px] shrink-0 rounded-lg border border-accent/40 bg-white px-2 py-1 text-[14px] font-semibold text-ink focus:outline-none"
+            className="w-[180px] shrink-0 rounded-lg border border-accent/40 bg-panel px-2 py-1 text-[14px] font-semibold text-ink focus:outline-none"
           />
         ) : isOwner ? (
           <button
             type="button"
             onClick={() => setEditingTitle(true)}
             title="Rename canvas"
-            className="max-w-[180px] shrink-0 truncate rounded-lg px-2 py-1 text-left text-[14px] font-semibold text-ink hover:bg-black/5"
+            className="max-w-[180px] shrink-0 truncate rounded-lg px-2 py-1 text-left text-[14px] font-semibold text-ink hover:bg-hover"
           >
             {title}
           </button>
@@ -789,7 +800,7 @@ export default function Canvas({ user, canvasId, onExit }) {
 
         <form
           onSubmit={handleSearchSubmit}
-          className="mx-auto flex w-full max-w-md items-center gap-2 rounded-full border border-black/5 bg-black/[0.03] py-1 pl-3.5 pr-1 focus-within:border-accent/30 focus-within:bg-white/70"
+          className="mx-auto flex w-full max-w-md items-center gap-2 rounded-full border border-line bg-sunken py-1 pl-3.5 pr-1 focus-within:border-accent/30 focus-within:bg-surface"
         >
           <svg className="h-4 w-4 shrink-0 text-subink" viewBox="0 0 20 20" fill="none">
             <circle cx="9" cy="9" r="6.5" stroke="currentColor" strokeWidth="1.6" />
@@ -821,13 +832,13 @@ export default function Canvas({ user, canvasId, onExit }) {
           </motion.button>
         </form>
 
-        <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-black/5 bg-black/[0.03] p-0.5">
+        <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-line bg-sunken p-0.5">
           <button
             type="button"
             onClick={undo}
             disabled={!canUndo}
             title="Undo (⌘Z)"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-subink hover:bg-white hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-subink hover:bg-panel hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
               <path
@@ -844,7 +855,7 @@ export default function Canvas({ user, canvasId, onExit }) {
             onClick={redo}
             disabled={!canRedo}
             title="Redo (⇧⌘Z)"
-            className="flex h-7 w-7 items-center justify-center rounded-full text-subink hover:bg-white hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-subink hover:bg-panel hover:text-ink disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
               <path
@@ -863,7 +874,7 @@ export default function Canvas({ user, canvasId, onExit }) {
           onClick={handleAutoLayout}
           disabled={nodes.length === 0}
           title="Tidy up the layout"
-          className="shrink-0 rounded-full border border-black/10 px-3 py-2 text-[13px] text-subink hover:bg-black/5 hover:text-ink disabled:opacity-40"
+          className="shrink-0 rounded-full border border-line2 px-3 py-2 text-[13px] text-subink hover:bg-hover hover:text-ink disabled:opacity-40"
         >
           Tidy
         </button>
@@ -872,16 +883,18 @@ export default function Canvas({ user, canvasId, onExit }) {
           type="button"
           onClick={() => setStudying(true)}
           disabled={nodes.length === 0}
-          className="shrink-0 rounded-full border border-black/10 px-3 py-2 text-[13px] text-subink hover:bg-black/5 hover:text-ink disabled:opacity-40"
+          className="shrink-0 rounded-full border border-line2 px-3 py-2 text-[13px] text-subink hover:bg-hover hover:text-ink disabled:opacity-40"
         >
           Study
         </button>
+
+        <ThemeToggle />
 
         {isOwner && (
           <button
             type="button"
             onClick={() => setShowShare(true)}
-            className="shrink-0 rounded-full border border-black/10 px-3 py-2 text-[13px] text-subink hover:bg-black/5 hover:text-ink"
+            className="shrink-0 rounded-full border border-line2 px-3 py-2 text-[13px] text-subink hover:bg-hover hover:text-ink"
           >
             Share
           </button>
@@ -915,7 +928,7 @@ export default function Canvas({ user, canvasId, onExit }) {
                 key={topic}
                 type="button"
                 onClick={() => addRootBlock(topic)}
-                className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-[12.5px] text-subink transition-colors hover:border-accent/30 hover:bg-white hover:text-ink"
+                className="rounded-full border border-line2 bg-surface px-3 py-1.5 text-[12.5px] text-subink transition-colors hover:border-accent/30 hover:bg-panel hover:text-ink"
               >
                 {topic}
               </button>
@@ -944,10 +957,10 @@ export default function Canvas({ user, canvasId, onExit }) {
         defaultEdgeOptions={{ type: 'smoothstep', style: EDGE_STYLE }}
         proOptions={{ hideAttribution: true }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={28} size={1} color="rgba(0,0,0,0.12)" />
+        <Background variant={BackgroundVariant.Dots} gap={28} size={1} color={dotColor} />
         <Controls
           showInteractive={false}
-          className="rounded-xl! border! border-black/5! bg-white/85! shadow-lg! backdrop-blur-xl!"
+          className="rounded-xl! border! border-line! bg-surface! shadow-lg! backdrop-blur-xl!"
         />
         {nodes.length > 2 && (
           <MiniMap
@@ -956,8 +969,8 @@ export default function Canvas({ user, canvasId, onExit }) {
             nodeStrokeWidth={0}
             nodeBorderRadius={3}
             nodeColor={(n) => categoryColor(n.data?.category)}
-            maskColor="rgba(245,245,247,0.7)"
-            className="rounded-xl! border! border-black/5! bg-white/85! shadow-lg!"
+            maskColor={maskColor}
+            className="rounded-xl! border! border-line! bg-surface! shadow-lg!"
           />
         )}
       </ReactFlow>

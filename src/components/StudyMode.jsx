@@ -99,7 +99,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
       <button
         type="button"
         onClick={onExit}
-        className="rounded-full px-2 py-1.5 text-[13px] text-subink hover:bg-black/5 hover:text-ink"
+        className="rounded-full px-2 py-1.5 text-[13px] text-subink hover:bg-hover hover:text-ink"
       >
         ✕ Close
       </button>
@@ -114,8 +114,8 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
           }}
           className={`ml-auto shrink-0 rounded-full border px-3 py-1.5 text-[12px] transition-colors ${
             flaggedOnly
-              ? 'border-amber-400/50 bg-amber-400/15 text-amber-700'
-              : 'border-black/10 text-subink hover:bg-black/5 hover:text-ink'
+              ? 'border-warn-line bg-warn-bg text-warn'
+              : 'border-line2 text-subink hover:bg-hover hover:text-ink'
           }`}
         >
           ? Flagged only ({flaggedCount})
@@ -127,7 +127,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
   if (deck.length === 0) {
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 backdrop-blur-xl">
-        <div className="border-b border-black/5 bg-white/60 px-5 py-3">{header}</div>
+        <div className="border-b border-line bg-surface px-5 py-3">{header}</div>
         <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
           <p className="text-[16px] font-medium text-ink">
             {flaggedOnly ? 'No flagged blocks with notes' : 'Nothing to study yet'}
@@ -154,12 +154,12 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
     const pct = total ? Math.round((gotCount / total) * 100) : 0;
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 backdrop-blur-xl">
-        <div className="border-b border-black/5 bg-white/60 px-5 py-3">{header}</div>
+        <div className="border-b border-line bg-surface px-5 py-3">{header}</div>
         <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-8">
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
-            className="w-full max-w-md rounded-3xl border border-black/5 bg-white p-7 text-center shadow-[0_16px_48px_-16px_rgba(0,0,0,0.2)]"
+            className="w-full max-w-md rounded-3xl border border-line bg-panel p-7 text-center shadow-[0_16px_48px_-16px_rgba(0,0,0,0.2)]"
           >
             <p className="text-[13px] font-medium uppercase tracking-wide text-subink">Session complete</p>
             <p className="mt-2 text-[44px] font-semibold leading-none tracking-tight text-ink">
@@ -177,7 +177,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                   {missed.map((m) => (
                     <div
                       key={m.id}
-                      className="flex items-center gap-2 rounded-lg bg-black/[0.03] px-2.5 py-1.5"
+                      className="flex items-center gap-2 rounded-lg bg-sunken px-2.5 py-1.5"
                     >
                       <span
                         className="h-2 w-2 shrink-0 rounded-full"
@@ -210,7 +210,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                   setRestrictTo(null);
                   restart({ reshuffle: true });
                 }}
-                className="rounded-xl border border-black/10 py-2.5 text-[13.5px] text-subink hover:bg-black/5 hover:text-ink"
+                className="rounded-xl border border-line2 py-2.5 text-[13.5px] text-subink hover:bg-hover hover:text-ink"
               >
                 Study all again
               </button>
@@ -230,7 +230,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 backdrop-blur-xl">
-      <div className="border-b border-black/5 bg-white/60 px-5 py-3">{header}</div>
+      <div className="border-b border-line bg-surface px-5 py-3">{header}</div>
 
       <div className="px-5 pt-4">
         <div className="mx-auto flex max-w-xl items-center gap-3">
@@ -256,7 +256,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -16, scale: 0.98 }}
               transition={{ type: 'spring', stiffness: 260, damping: 24 }}
-              className="rounded-3xl border border-black/5 bg-white p-7 shadow-[0_16px_48px_-16px_rgba(0,0,0,0.2)]"
+              className="rounded-3xl border border-line bg-panel p-7 shadow-[0_16px_48px_-16px_rgba(0,0,0,0.2)]"
             >
               <div className="flex items-center gap-2">
                 <span
@@ -267,7 +267,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                   {categoryLabel(card.category)}
                 </span>
                 {card.unsure && (
-                  <span className="rounded-full bg-amber-400/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-700">
+                  <span className="rounded-full bg-warn-bg px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warn">
                     flagged
                   </span>
                 )}
@@ -282,7 +282,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                 {card.label}
               </p>
 
-              <div className="mt-4 min-h-[92px] rounded-2xl border border-black/5 bg-black/[0.02] p-4">
+              <div className="mt-4 min-h-[92px] rounded-2xl border border-line bg-sunken p-4">
                 <AnimatePresence mode="wait">
                   {revealed ? (
                     <motion.p
@@ -316,7 +316,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                 <button
                   type="button"
                   onClick={() => score(false)}
-                  className="rounded-xl border border-black/10 bg-white px-5 py-2.5 text-[13.5px] font-medium text-subink hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  className="rounded-xl border border-line2 bg-panel px-5 py-2.5 text-[13.5px] font-medium text-subink hover:border-danger hover:bg-danger-bg hover:text-danger"
                 >
                   ← Missed it
                 </button>

@@ -73,6 +73,17 @@ import { handleKnowledgeRequest } from './server/knowledgeRoutes.js'
 app.post('/api/knowledge', handleKnowledgeRequest)
 ```
 
+## Dark mode
+
+Follows your OS by default. The sun/moon button in the header (and the canvas
+toolbar) overrides it, and the choice is remembered. A small inline script in
+`index.html` applies the stored theme before first paint so dark-mode users
+don't get a white flash.
+
+Colours are semantic CSS variables defined once in `src/index.css`
+(`--color-surface`, `--color-ink`, `--color-line`, …), so components never
+hardcode white or black and both themes stay in sync.
+
 ## Where things live
 
 | Path | What it does |
@@ -80,7 +91,8 @@ app.post('/api/knowledge', handleKnowledgeRequest)
 | `src/components/Canvas.jsx` | The canvas: blocks, edges, undo/redo, AI calls |
 | `src/components/KnowledgeBlock.jsx` | A single block — title, notes, date, category, flag |
 | `src/components/StudyMode.jsx` | Flashcards generated from your notes |
-| `src/components/Home.jsx` | Canvas library, example templates, sharing |
+| `src/components/Home.jsx` | Canvas library sidebar (Your canvases / Shared with me / Examples) |
+| `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
 | `src/lib/canvasStore.js` | Canvas persistence (localStorage) |

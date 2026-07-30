@@ -5,6 +5,19 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HistoryChart</title>
+    <script>
+      // Set the theme before first paint, otherwise a dark-mode user sees a
+      // white flash while the bundle loads. Kept inline and dependency-free
+      // for that reason.
+      try {
+        var stored = localStorage.getItem('historychart:theme:v1');
+        if (stored === 'dark' || stored === 'light') {
+          document.documentElement.dataset.theme = stored;
+        }
+      } catch (e) {
+        /* private mode / storage disabled — fall back to the media query */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

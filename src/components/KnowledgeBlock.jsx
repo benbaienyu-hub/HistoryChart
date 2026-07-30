@@ -9,13 +9,13 @@ import { CATEGORIES, categoryColor, categoryLabel } from '../lib/categories';
 const anchorStyle = {
   width: 6,
   height: 6,
-  background: 'rgba(0,0,0,0.18)',
+  background: 'var(--color-edge)',
   border: 'none',
   pointerEvents: 'none',
 };
 
 const relationHandleClass =
-  '!h-2.5 !w-2.5 !border-2 !border-white !bg-subink/40 !opacity-0 transition-opacity group-hover:!opacity-100 hover:!bg-accent';
+  'h-2.5! w-2.5! border-2! border-panel! bg-subink/40! opacity-0! transition-opacity group-hover:opacity-100! hover:bg-accent!';
 
 function KnowledgeBlock({ data, id }) {
   const {
@@ -86,8 +86,8 @@ function KnowledgeBlock({ data, id }) {
       className={`group relative w-[280px] rounded-2xl border px-4 py-3.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-8px_rgba(0,0,0,0.12)] backdrop-blur-xl transition-shadow duration-200 hover:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_16px_32px_-8px_rgba(0,0,0,0.2)] ${
         aiSuggested
           ? 'border-dashed border-accent/40 bg-accent-soft/70'
-          : 'border-black/5 bg-white/85'
-      } ${unsure ? 'ring-2 ring-amber-400/60' : ''}`}
+          : 'border-line bg-surface'
+      } ${unsure ? 'ring-2 ring-warn-line' : ''}`}
     >
       {!isRoot && <Handle type="target" position={Position.Top} style={anchorStyle} />}
 
@@ -113,8 +113,8 @@ function KnowledgeBlock({ data, id }) {
           title={unsure ? 'Clear “not sure” flag' : 'Mark as “not sure”'}
           className={`h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
             unsure
-              ? 'flex bg-amber-400/20 text-amber-600'
-              : 'hidden text-subink/50 hover:bg-black/5 hover:text-ink group-hover:flex'
+              ? 'flex bg-warn-bg text-warn'
+              : 'hidden text-subink/50 hover:bg-hover hover:text-ink group-hover:flex'
           }`}
         >
           ?
@@ -123,7 +123,7 @@ function KnowledgeBlock({ data, id }) {
           type="button"
           onClick={startLabelEdit}
           title="Rename"
-          className="hidden h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-black/5 hover:text-ink group-hover:flex"
+          className="hidden h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-hover hover:text-ink group-hover:flex"
         >
           <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
             <path
@@ -139,7 +139,7 @@ function KnowledgeBlock({ data, id }) {
           type="button"
           onClick={() => onDelete(id)}
           title="Delete"
-          className="hidden h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-black/5 hover:text-ink group-hover:flex"
+          className="hidden h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-hover hover:text-ink group-hover:flex"
         >
           ×
         </button>
@@ -166,7 +166,7 @@ function KnowledgeBlock({ data, id }) {
                 initial={{ opacity: 0, scale: 0.9, y: -4 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.9 }}
-                className="nodrag absolute left-0 top-6 z-50 w-[132px] rounded-xl border border-black/10 bg-white p-1.5 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.25)]"
+                className="nodrag absolute left-0 top-6 z-50 w-[132px] rounded-xl border border-line2 bg-panel p-1.5 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.25)]"
               >
                 {CATEGORIES.map((c) => (
                   <button
@@ -176,7 +176,7 @@ function KnowledgeBlock({ data, id }) {
                       onFieldChange(id, { category: c.key });
                       setShowPalette(false);
                     }}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[12px] hover:bg-black/5 ${
+                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[12px] hover:bg-hover ${
                       (category ?? 'none') === c.key ? 'text-ink' : 'text-subink'
                     }`}
                   >
@@ -206,7 +206,7 @@ function KnowledgeBlock({ data, id }) {
                 }
                 if (e.key === 'Escape') setEditingLabel(false);
               }}
-              className="nodrag w-full rounded-lg border border-accent/40 bg-white px-2 py-1 text-[15px] font-semibold leading-tight text-ink focus:outline-none focus:ring-2 focus:ring-accent/15"
+              className="nodrag w-full rounded-lg border border-accent/40 bg-panel px-2 py-1 text-[15px] font-semibold leading-tight text-ink focus:outline-none focus:ring-2 focus:ring-accent/15"
             />
           ) : (
             <p
@@ -237,7 +237,7 @@ function KnowledgeBlock({ data, id }) {
         className={`nodrag mt-2 w-full resize-none rounded-lg border px-2 py-1.5 text-[12.5px] leading-snug text-ink/90 placeholder:text-subink/60 focus:outline-none focus:ring-1 focus:ring-accent/30 ${
           aiFilled
             ? 'border-accent/30 bg-accent-soft'
-            : 'border-black/5 bg-black/[0.02] focus:border-accent/40'
+            : 'border-line bg-sunken focus:border-accent/40'
         }`}
       />
       {loading && (
@@ -258,7 +258,7 @@ function KnowledgeBlock({ data, id }) {
       )}
 
       {aiCorrection && (
-        <p className="mt-1.5 rounded-lg border border-amber-400/30 bg-amber-400/10 px-2 py-1 text-[11.5px] leading-snug text-amber-700">
+        <p className="mt-1.5 rounded-lg border border-warn-line bg-warn-bg px-2 py-1 text-[11.5px] leading-snug text-warn">
           ⚠️ {aiCorrection}
         </p>
       )}
@@ -283,7 +283,7 @@ function KnowledgeBlock({ data, id }) {
                 if (!childText.trim()) onCancelChild(id);
               }}
               placeholder="Subtopic name…"
-              className="w-full rounded-lg border border-accent/30 bg-white px-2 py-1 text-[12.5px] text-ink focus:outline-none"
+              className="w-full rounded-lg border border-accent/30 bg-panel px-2 py-1 text-[12.5px] text-ink focus:outline-none"
             />
           </motion.form>
         )}
