@@ -208,7 +208,7 @@ export function configProblem() {
       `OPENAI_BASE_URL is set to ${readBaseUrl()} but OPENAI_MODEL is not set. ` +
       'A model name is specific to its provider, so there is no sensible default here. ' +
       'Run `npm run check-key` — it lists the models that provider offers — then put one ' +
-      'in OPENAI_MODEL in .env. No restart needed; the file is re-read per request.'
+      'in OPENAI_MODEL in .env. The file is re-read on each request, so that takes effect immediately.'
     );
   }
   return null;

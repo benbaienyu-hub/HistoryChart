@@ -168,8 +168,9 @@ describe('a custom provider with no model set', () => {
     expect(message).toContain('OPENAI_MODEL');
     expect(message).toContain(baseUrl);
     expect(message).toContain('check-key');
-    // No longer demands a restart, since the file is re-read per request.
-    expect(message).not.toMatch(/restart/i);
+    // Must not demand a restart: the file is re-read on each request now, and
+    // telling the user otherwise is what sent them round this loop twice.
+    expect(message).not.toMatch(/restart the dev server/i);
   });
 
   it('stops complaining once a model is set', async () => {
