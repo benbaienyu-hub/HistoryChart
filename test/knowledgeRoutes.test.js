@@ -5,6 +5,7 @@ import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildPrompt,
+  formatPoints,
   generateKnowledge,
   handleKnowledgeRequest,
   hasApiKey,
@@ -106,8 +107,19 @@ describe('offline mode', () => {
   it('labels its output so it cannot be mistaken for real content', async () => {
     vi.stubEnv('OPENAI_MOCK', '1');
     const { summary } = await generateKnowledge({ topic: 'Rome' });
-    expect(summary).toMatch(/^\[offline sample\]/);
+    expect(summary).toMatch(/^- \[offline sample\]/);
     expect(summary).toContain('OPENAI_MOCK');
+  });
+
+  it('writes its sample content as dot points, like the real thing', async () => {
+    // A demo that produced paragraphs would mis-sell how study mode splits them.
+    vi.stubEnv('OPENAI_MOCK', '1');
+    const { summary, subtopics } = await generateKnowledge({ topic: 'Rome' });
+    for (const text of [summary, subtopics[0].detail]) {
+      const lines = text.split('\n');
+      expect(lines.length).toBeGreaterThan(1);
+      for (const line of lines) expect(line).toMatch(/^- \S/);
+    }
   });
 
   it('shapes sub-topics as { label, detail }', async () => {
@@ -318,6 +330,58 @@ describe('graph levels', () => {
     const prompt = buildPrompt({ topic: 'Rome', level: 'detailed' });
     expect(prompt).toMatch(/not written any notes/i);
     expect(prompt).toMatch(/no sub-topics/i);
+  });
+
+  it('asks every level for a specific number of points, in both fields', () => {
+    // Without a count the model writes a paragraph; without a per-detail count it
+    // writes points for the summary and a paragraph for the leaves.
+    for (const level of GRAPH_LEVELS) {
+      const prompt = buildPrompt({ topic: 'Rome', level: level.key });
+      expect(prompt, level.key).toMatch(/points?/i);
+      expect(prompt, level.key).toMatch(/"summary"[^.]*\d/);
+      expect(prompt, level.key).toMatch(/"detail"/);
+    }
+  });
+
+  it('asks Simple for fewer points than Concise', () => {
+    // Concise is the level that trades graph size for depth per block, so if it
+    // ever asked for no more than Simple it would have no reason to exist.
+    expect(buildPrompt({ topic: 'Rome', level: 'simple' })).toMatch(/"summary" 2 points/);
+    expect(buildPrompt({ topic: 'Rome', level: 'concise' })).toMatch(/"summary" 4 or 5/);
+  });
+});
+
+describe('formatPoints', () => {
+  it('turns a paragraph into dot points, one per line', () => {
+    expect(formatPoints('Rome was founded in 753 BC. The republic fell in 27 BC.')).toBe(
+      '- Rome was founded in 753 BC.\n- The republic fell in 27 BC.'
+    );
+  });
+
+  it('normalises whichever marker the model chose', () => {
+    expect(formatPoints('• first point here\n* second point here\n1. third point here')).toBe(
+      '- first point here\n- second point here\n- third point here'
+    );
+  });
+
+  it('leaves already-correct points as they are', () => {
+    const text = '- First point of substance\n- Second point of substance';
+    expect(formatPoints(text)).toBe(text);
+  });
+
+  it('is empty for empty input, so "the user already wrote notes" survives', () => {
+    expect(formatPoints('')).toBe('');
+    expect(formatPoints(undefined)).toBe('');
+    expect(formatPoints('   \n ')).toBe('');
+  });
+
+  it('marks up a single point too, rather than leaving it bare', () => {
+    expect(formatPoints('Addis Ababa is the capital.')).toBe('- Addis Ababa is the capital.');
+  });
+
+  it('does not double the marker on repeat passes', () => {
+    const once = formatPoints('One point here, of some length.');
+    expect(formatPoints(once)).toBe(once);
   });
 });
 

@@ -117,8 +117,10 @@ describe('a custom provider', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0].url).toBe('/v1/chat/completions');
-    expect(result.summary).toBe('From the stub provider.');
-    expect(result.subtopics).toEqual([{ label: 'Stub topic', detail: 'A detail from the stub.' }]);
+    expect(result.summary).toBe('- From the stub provider.');
+    expect(result.subtopics).toEqual([
+      { label: 'Stub topic', detail: '- A detail from the stub.' },
+    ]);
   });
 
   it('sends the key as a bearer token', async () => {
@@ -274,7 +276,7 @@ describe('a model that does not support json_schema', () => {
       'json_schema',
       'json_object',
     ]);
-    expect(result.summary).toBe('From the stub provider.');
+    expect(result.summary).toBe('- From the stub provider.');
   });
 
   it('spells the required shape out once the schema is gone', async () => {
@@ -293,7 +295,7 @@ describe('a model that does not support json_schema', () => {
       'json_object',
       'none',
     ]);
-    expect(result.summary).toBe('From the stub provider.');
+    expect(result.summary).toBe('- From the stub provider.');
   });
 
   it('remembers, so the wasted request happens once per model', async () => {
@@ -311,8 +313,36 @@ describe('a model that does not support json_schema', () => {
     stubContent =
       '```json\n{"summary":"Fenced.","correction":"","subtopics":[{"label":"A","detail":"B"}]}\n```';
     const result = await generateKnowledge({ topic: 'Ethiopia' });
-    expect(result.summary).toBe('Fenced.');
-    expect(result.subtopics).toEqual([{ label: 'A', detail: 'B' }]);
+    expect(result.summary).toBe('- Fenced.');
+    expect(result.subtopics).toEqual([{ label: 'A', detail: '- B' }]);
+  });
+
+  it('bulletises a paragraph, so a non-compliant model still fills study cards', async () => {
+    // The prompt asks for dot points and the schema repeats it, but the plainer
+    // tiers have no schema at all and compliance is never guaranteed. A model
+    // that answers in prose must not put a paragraph in the block.
+    rejectFormats = new Set(['json_schema', 'json_object']);
+    stubContent = JSON.stringify({
+      summary: 'Ethiopia lies in the Horn of Africa. It was never colonised by Europe.',
+      correction: '',
+      subtopics: [{ label: 'Highlands', detail: 'They hold most of the farmland.' }],
+    });
+    const result = await generateKnowledge({ topic: 'Ethiopia' });
+    expect(result.summary).toBe(
+      '- Ethiopia lies in the Horn of Africa.\n- It was never colonised by Europe.'
+    );
+    expect(result.subtopics[0].detail).toBe('- They hold most of the farmland.');
+  });
+
+  it('leaves a correction as prose — it is an argument, not a card', async () => {
+    rejectFormats = new Set(['json_schema', 'json_object']);
+    stubContent = JSON.stringify({
+      summary: '',
+      correction: 'The date is wrong. Adwa was 1896, not 1898.',
+      subtopics: [],
+    });
+    const result = await generateKnowledge({ topic: 'Ethiopia', notes: 'Adwa was 1898.' });
+    expect(result.correction).toBe('The date is wrong. Adwa was 1896, not 1898.');
   });
 
   it('does not walk the ladder for a failure that is not about the format', async () => {

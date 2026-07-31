@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import OpenAI from 'openai';
 import { parseEnv } from '../scripts/keyDiagnostics.js';
+import { splitPoints } from '../src/lib/deck.js';
 
 // Server-side only. The API key must never reach the browser, so every model
 // call goes through this module — it is mounted into the Vite dev server (see
@@ -21,7 +22,7 @@ const KNOWLEDGE_SCHEMA = {
     summary: {
       type: 'string',
       description:
-        'Two sentences at most, explaining the topic plainly. Empty string if the user already wrote adequate notes.',
+        'Dot points, one per line, each line starting with "- ". Each point is a complete standalone sentence stating one fact. Empty string if the user already wrote adequate notes.',
     },
     correction: {
       type: 'string',
@@ -43,7 +44,7 @@ const KNOWLEDGE_SCHEMA = {
           detail: {
             type: 'string',
             description:
-              'One sentence saying what this sub-topic is and why it matters to the parent topic. Specific, not a restatement of the label.',
+              'Dot points, one per line, each line starting with "- ", saying what this sub-topic is and why it matters to the parent topic. Specific, not a restatement of the label.',
           },
         },
         required: ['label', 'detail'],
@@ -62,10 +63,10 @@ const KNOWLEDGE_SCHEMA = {
 // only in how many blocks the client asks for. Mirrors src/lib/graphLevels.js,
 // which owns the counts.
 const LEVEL_GUIDANCE = {
-  simple: `Write for someone meeting this subject for the first time. Keep "summary" to a single plain sentence, avoid jargon, and where a term is unavoidable, gloss it. For "subtopics", choose the most fundamental parts of the subject, and keep each "detail" to one short, plain sentence.`,
-  concise: `Write for someone studying this subject seriously, but keep the graph small. Every "summary" and every "detail" should carry real substance — names, dates, numbers — while you choose only the sub-topics that genuinely matter most. Prefer few, weighty blocks over many thin ones.`,
-  detailed: `Write for someone studying this subject seriously. Keep "summary" to at most two sentences, but make them carry specifics — names, dates, numbers. For "subtopics", cover the main branches of the subject, and make each "detail" a concrete sentence rather than a definition.`,
-  advanced: `Write for someone who already knows the basics. Do not explain elementary terms. Keep "summary" to at most two dense sentences, and prefer precise, technical, specific content over general orientation. For "subtopics", include the less obvious branches a newcomer's overview would leave out, and make each "detail" carry a specific fact.`,
+  simple: `Write for someone meeting this subject for the first time. Give "summary" 2 points in plain language, avoiding jargon and glossing any term you cannot avoid. For "subtopics", choose the most fundamental parts of the subject, and give each "detail" 1 or 2 short, plain points.`,
+  concise: `Write for someone studying this subject seriously, in a deliberately small graph — so each block has to carry its weight. Give "summary" 4 or 5 substantial points and each "detail" 2 or 3, every one of them carrying names, dates, or numbers. Choose only the sub-topics that genuinely matter most: few, weighty blocks, not many thin ones.`,
+  detailed: `Write for someone studying this subject seriously. Give "summary" 3 points that carry specifics — names, dates, numbers — and give each "detail" 2 concrete points rather than a definition. For "subtopics", cover the main branches of the subject.`,
+  advanced: `Write for someone who already knows the basics. Do not explain elementary terms. Give "summary" 3 or 4 dense, precise points and each "detail" 2 or 3, preferring technical specifics over general orientation. For "subtopics", include the less obvious branches a newcomer's overview would leave out.`,
 };
 
 // How many sub-topics the caller will actually use. Sent so the prompt can state
@@ -118,20 +119,28 @@ function mockKnowledge({ topic, notes, level, context, maxSubtopics }) {
   // Offset the aspect list by the topic, otherwise every level picks the same
   // first aspect and a branch's children repeat their parent's label.
   const offset = seedFrom(topic);
+  const within = subject ? `${topic}, within ${subject},` : topic;
   return {
+    // Dot points, like real output — so a demo shows the study cards splitting
+    // the way they will with a key attached.
     summary: (notes ?? '').trim()
       ? ''
-      : `[offline sample] A ${level} summary of ${topic}${
-          subject ? ` as it applies to ${subject}` : ''
-        } would go here. Set OPENAI_MOCK=0 for real output.`,
+      : [
+          `- [offline sample] A ${level} summary of ${topic}${
+            subject ? ` as it applies to ${subject}` : ''
+          } would go here.`,
+          `- Each line is one dot point, and one card in study mode.`,
+          `- Set OPENAI_MOCK=0 for real output.`,
+        ].join('\n'),
     correction: '',
     subtopics: MOCK_ASPECTS.slice(0, cap).map((_, i) => {
       const aspect = MOCK_ASPECTS[(offset + i) % MOCK_ASPECTS.length];
       return {
         label: `${topic} — ${aspect}`,
-        detail: `[offline sample] One specific fact about the ${aspect} of ${
-          subject ? `${topic}, within ${subject},` : topic
-        } would go here.`,
+        detail: [
+          `- [offline sample] One specific fact about the ${aspect} of ${within} would go here.`,
+          `- A second point about the ${aspect} would follow it.`,
+        ].join('\n'),
       };
     }),
   };
@@ -147,7 +156,11 @@ Only populate "correction" when the notes contain a genuine factual error — a 
 
 Only populate "summary" when the notes are empty or say almost nothing. If the user has already written a reasonable account, leave it empty — do not overwrite their words.
 
-For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas. Give each one a short label and a single sentence of substance — the sentence is shown to the user as the starting content of that block, so it must say something, not merely restate the label.
+Write "summary" and every "detail" as dot points: one point per line, each line beginning with "- ". Every point must be a complete sentence that stands on its own, because it is read on its own. Never write a fragment, a heading, or a bare label — "- Highland agriculture" is not a point; "- Teff grows on the highland plateau and is the staple grain." is. Do not nest points, and do not write a paragraph inside a point.
+
+This matters more than it looks: each point becomes one card in the user's revision, graded separately. A point that says nothing is a mark they lose for failing to remember nothing. So write few points and make each one worth remembering — the stated count is a ceiling, and coming in under it is a better answer than padding to reach it.
+
+For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas. Give each one a short label; its "detail" points are shown to the user as the starting content of that block, so they must say something, not merely restate the label.
 
 Never pad the list to reach a count. Some topics support many sub-topics and some support two; returning the honest number is always better than filling space.`;
 
@@ -313,7 +326,8 @@ function responseFormatFor(tier) {
 // Only the schema guarantees the shape, so the plainer tiers have to state it.
 const SHAPE_INSTRUCTION = `Reply with JSON and nothing else — no prose, no code fences — in exactly this shape:
 {"summary": "…", "correction": "…", "subtopics": [{"label": "…", "detail": "…"}]}
-Every field is required. Use an empty string for "summary" or "correction" when they do not apply, and an empty array for "subtopics".`;
+Every field is required. Use an empty string for "summary" or "correction" when they do not apply, and an empty array for "subtopics".
+"summary" and each "detail" are dot points: one point per line, each line starting with "- ", written as \\n inside the JSON string. "correction" is ordinary prose.`;
 
 // A provider refusing the format is a reason to try a plainer one. Anything else
 // — a bad key, an unknown model, a rate limit — is not, and must surface.
@@ -336,16 +350,30 @@ export function parseKnowledgeJson(text) {
   return JSON.parse(unfenced.slice(start, end + 1));
 }
 
+// The prompt asks for dot points, and the schema's descriptions repeat it, but
+// compliance isn't a guarantee — the plainer format tiers have no schema at all,
+// and a model that returns a paragraph would otherwise land one in the block.
+// So the text is put through the same splitter the study grader uses, which both
+// bulletises prose and normalises whatever marker the model chose (•, *, "1.")
+// to a single style. One definition of "a point", used by the writer and the
+// grader alike.
+export function formatPoints(text) {
+  const points = splitPoints(text);
+  return points.map((point) => `- ${point}`).join('\n');
+}
+
 function shapeResult(parsed, maxSubtopics) {
   return {
-    summary: String(parsed?.summary ?? '').trim(),
+    summary: formatPoints(parsed?.summary),
+    // Prose, deliberately: a correction is an argument about the notes, not
+    // material to memorise, so it isn't a card and isn't a list.
     correction: String(parsed?.correction ?? '').trim(),
     // A sub-topic with no label is unusable; one with no detail is merely thin,
     // so it survives.
     subtopics: (Array.isArray(parsed?.subtopics) ? parsed.subtopics : [])
       .map((s) => ({
         label: String(s?.label ?? '').trim(),
-        detail: String(s?.detail ?? '').trim(),
+        detail: formatPoints(s?.detail),
       }))
       .filter((s) => s.label)
       .slice(0, normalizeMaxSubtopics(maxSubtopics)),

@@ -258,7 +258,9 @@ function KnowledgeBlock({ data, id }) {
         value={notes}
         onChange={(e) => onNotesChange(id, e.target.value)}
         placeholder={loading ? 'Researching…' : 'Add notes…'}
-        rows={4}
+        // Generated notes arrive as 2–4 dot points, most of which wrap, so four
+        // rows put nearly every block behind a scroll on arrival.
+        rows={6}
         className={`nodrag nowheel mt-2 w-full resize-y rounded-lg border px-2 py-1.5 text-[13px] leading-relaxed text-ink/90 placeholder:text-subink/60 focus:outline-none focus:ring-1 focus:ring-accent/30 ${
           aiFilled
             ? 'border-accent/30 bg-accent-soft'

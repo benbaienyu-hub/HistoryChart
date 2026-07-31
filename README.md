@@ -217,6 +217,37 @@ import { handleKnowledgeRequest } from './server/knowledgeRoutes.js'
 app.post('/api/knowledge', handleKnowledgeRequest)
 ```
 
+## Studying
+
+Any block with notes is a card, with the title as the prompt. Cards are graded
+**per point, not word for word** — nobody recalls a paragraph of notes verbatim,
+and being marked wrong for failing to is not a useful signal.
+
+So notes are split into points. Lines and bullets are your own division of the
+material and are taken exactly as written, including a deliberately short one
+like `1889`. A paragraph is split by sentence instead, with abbreviations and
+initials protected (`e.g. teff`, `W. E. B. Du Bois` stay whole) and fragments
+under ~24 characters absorbed into the neighbour, so a stray `Decisive.` never
+becomes a point on its own.
+
+The card says how many points there are *before* you reveal — which turns
+"reproduce the paragraph" into a target you can hit — then you tick the ones you
+had (`1`–`9`, `A` for all, `→` to move on). A one-point card keeps the plain
+Missed it / Got it pair, since a checklist of one is just friction.
+
+The summary counts points rather than cards, and lists the specific points that
+got away under each block, so it tells you what to reread instead of only which
+card felt bad. "Retry the N with gaps" restricts the next round to those blocks.
+
+**Generated notes are dot points for the same reason.** The model is asked for a
+small number of complete, standalone claims — one per line — and told why: each
+line becomes a card, so a padded line is a mark lost for failing to remember
+nothing. Compliance isn't guaranteed (the plainer format tiers carry no schema at
+all), so a prose reply is put through the same splitter the grader uses, which
+also normalises whatever marker the model chose. One definition of "a point",
+shared by the writer and the grader. Corrections stay prose — a correction is an
+argument about your notes, not material to memorise.
+
 ## Working with a big canvas
 
 Generated graphs get wide fast, so every block with children carries a chevron
@@ -247,14 +278,14 @@ hardcode white or black and both themes stay in sync.
 | --- | --- |
 | `src/components/Canvas.jsx` | The canvas: blocks, edges, undo/redo, AI calls |
 | `src/components/KnowledgeBlock.jsx` | A single block — title, notes, date, category, flag |
-| `src/components/StudyMode.jsx` | Flashcards generated from your notes |
+| `src/components/StudyMode.jsx` | Flashcards from your notes, graded per point |
 | `src/components/Home.jsx` | Canvas library sidebar (Your canvases / Shared with me / Examples) |
 | `src/lib/graph.js` | Pure tree helpers — descendants, collapse visibility |
 | `src/lib/graphLevels.js` | The Simple / Detailed / Advanced depths and their sizing |
 | `src/components/GraphLevelMenu.jsx` | The depth picker that drops out of "Make a graph" |
 | `src/components/BlockDetail.jsx` | The half-screen expanded view of one block |
 | `src/lib/layout.js` | Tidy-tree layout over the `parentId` forest |
-| `src/lib/deck.js` | Flashcard selection and deterministic shuffle |
+| `src/lib/deck.js` | Flashcard selection, point splitting, and per-point grading |
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
