@@ -13,6 +13,12 @@ ones in your own notes is the point of the app.
 > the `historychart:` prefix to `lacuna:`; `src/lib/migrate.js` moves existing
 > data across on first load, so an upgrade keeps your canvases.
 
+## Business plan
+
+`BUSINESS_PLAN.md` covers positioning, the freemium model, unit economics computed
+from the app's real request pattern, go-to-market, risks, and an explicit account of
+what is and isn't built. It is the source; the PDF handed around is rendered from it.
+
 ## Running it
 
 Requires **Node 20.19+ or 22.12+** (Vite 8's floor — older Node will fail to start).
