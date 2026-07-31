@@ -62,11 +62,33 @@ gitignored.
 Note that a real environment variable takes precedence over `.env`; if
 `OPENAI_API_KEY` is already exported in your shell, that value wins.
 
+### When the key doesn't work
+
+```bash
+npm run check-key
+```
+
+This is the one command to run. It reads the same value the dev server would
+use, points out the faults that make a key fail before spending a request
+(the placeholder left in place, a line break in the middle, a curly quote from a
+bad paste), then asks OpenAI directly whether it accepts the key and reports what
+OpenAI said. It never prints the key — only its length and first and last few
+characters.
+
+The failure it exists for: **a shell variable silently overriding `.env`.** That
+is Vite's precedence, not a bug, but it means you can edit `.env` all day and
+change nothing. `check-key` tells you which source won.
+
+A 401 in the app is not a config problem — it means OpenAI refused the key. It is
+either revoked, from a deleted project, or the copy is damaged. Keys are shown
+once at creation, so if you didn't save it you need a new one.
+
 ### Choosing a model
 
 The route defaults to `gpt-4o`. If your key doesn't have access to it, the app
 tells you so and you can set `OPENAI_MODEL` in `.env` to any model you do have —
-it needs to support JSON-schema structured outputs.
+it needs to support JSON-schema structured outputs. `npm run check-key` lists the
+models your key can actually reach.
 
 ### Deploying
 
@@ -144,6 +166,7 @@ npm run build    # production build
 npm run preview  # serve the build — no AI route, see Deploying
 npm run lint     # oxlint
 npm test         # vitest, single run
+npm run check-key   # diagnose an OPENAI_API_KEY that isn't working
 npm run test:watch
 ```
 

@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import OpenAI from 'openai';
+import { parseEnv } from '../scripts/keyDiagnostics.js';
 
 // Server-side only. The API key must never reach the browser, so every model
 // call goes through this module — it is mounted into the Vite dev server (see
@@ -57,6 +59,29 @@ function readModel() {
 
 export function hasApiKey() {
   return readKey() !== null;
+}
+
+// Does .env itself define a key? Used only to tell the user, on a 401, whether
+// a shell variable is shadowing their file — the most confusing failure here.
+function readEnvFileKey() {
+  try {
+    const text = readFileSync(new URL('../.env', import.meta.url), 'utf8');
+    return parseEnv(text).OPENAI_API_KEY?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// The faults worth naming in a 401 log. Deliberately does not include the key.
+function describeKeyFaults(key) {
+  const faults = [];
+  if (key.includes('...')) faults.push('still contains the "..." placeholder');
+  if (/\s/.test(key)) faults.push('contains whitespace');
+  if (/["']/.test(key)) faults.push('contains a quote character');
+  if (/[^\x20-\x7E]/.test(key)) faults.push('contains a non-ASCII character');
+  if (!key.startsWith('sk-')) faults.push('does not start with "sk-"');
+  if (key.length < 40) faults.push('shorter than any current OpenAI key');
+  return faults.join('; ');
 }
 
 function buildPrompt({ topic, notes, childLabels }) {
@@ -177,9 +202,23 @@ export async function handleKnowledgeRequest(req, res) {
 
     // Surface the two setup mistakes that are otherwise baffling, with the fix.
     if (error.status === 401) {
-      console.error('[knowledge] 401 — the key in .env was rejected.');
+      // A bare "401" is the least actionable message this route can produce, so
+      // report what the process is actually holding — never the key itself.
+      const key = readKey() ?? '';
+      const fromShell = Boolean(process.env.OPENAI_API_KEY) && !readEnvFileKey();
+      console.error(
+        [
+          '[knowledge] 401 — OpenAI rejected the key.',
+          `  length: ${key.length}`,
+          `  starts: ${JSON.stringify(key.slice(0, 8))}`,
+          `  source: ${fromShell ? 'shell environment (this overrides .env)' : '.env or shell'}`,
+          `  suspicious: ${describeKeyFaults(key) || 'nothing obvious'}`,
+          '  Run `npm run check-key` for a definitive answer.',
+        ].join('\n')
+      );
       send(res, 502, {
-        error: 'OpenAI rejected the API key. Check OPENAI_API_KEY in .env, then restart the dev server.',
+        error:
+          'OpenAI rejected the API key. Run `npm run check-key` in the project folder — it will say exactly why.',
       });
       return;
     }
