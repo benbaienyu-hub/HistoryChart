@@ -6,8 +6,10 @@ import {
   deleteCanvas,
   getCanvas,
   rememberOpenCanvas,
+  renameCanvas,
   restorableCanvasId,
   shareCanvas,
+  uniqueTitle,
   unshareCanvas,
   updateCanvas,
 } from '../src/lib/canvasStore';
@@ -170,5 +172,102 @@ describe('remembering the open canvas', () => {
     const canvas = createCanvas({ ownerEmail: ALICE });
     rememberOpenCanvas(BOB, canvas.id);
     expect(restorableCanvasId(BOB)).toBeNull();
+  });
+});
+
+describe('uniqueTitle', () => {
+  it('leaves a free title alone', () => {
+    expect(uniqueTitle('Ethiopia', ['Rome', 'Carthage'])).toBe('Ethiopia');
+  });
+
+  it('numbers the second one from (1)', () => {
+    expect(uniqueTitle('Untitled canvas', ['Untitled canvas'])).toBe('Untitled canvas (1)');
+  });
+
+  it('keeps counting past the first collision', () => {
+    const taken = ['Untitled canvas', 'Untitled canvas (1)', 'Untitled canvas (2)'];
+    expect(uniqueTitle('Untitled canvas', taken)).toBe('Untitled canvas (3)');
+  });
+
+  it('fills a gap left by a deletion rather than always taking the highest', () => {
+    const taken = ['Notes', 'Notes (2)'];
+    expect(uniqueTitle('Notes', taken)).toBe('Notes (1)');
+  });
+
+  it('renumbers a title that already ends in a counter, instead of stacking', () => {
+    // Duplicating "Notes (2)" should give "Notes (3)", never "Notes (2) (1)".
+    expect(uniqueTitle('Notes (2)', ['Notes', 'Notes (2)'])).toBe('Notes (1)');
+    expect(uniqueTitle('Notes (2)', ['Notes (1)', 'Notes (2)'])).toBe('Notes (3)');
+  });
+
+  it('compares case-insensitively — two names that read alike are alike', () => {
+    expect(uniqueTitle('untitled canvas', ['Untitled Canvas'])).toBe('untitled canvas (1)');
+  });
+
+  it('ignores surrounding whitespace on both sides of the comparison', () => {
+    expect(uniqueTitle('  Notes  ', ['Notes'])).toBe('Notes (1)');
+    expect(uniqueTitle('Notes', ['  Notes '])).toBe('Notes (1)');
+  });
+
+  it('falls back to the default for an empty title', () => {
+    expect(uniqueTitle('', [])).toBe('Untitled canvas');
+    expect(uniqueTitle('   ', [])).toBe('Untitled canvas');
+    expect(uniqueTitle(null, ['Untitled canvas'])).toBe('Untitled canvas (1)');
+  });
+
+  it('handles an absent list of taken titles', () => {
+    expect(uniqueTitle('Notes', undefined)).toBe('Notes');
+    expect(uniqueTitle('Notes', [null, undefined])).toBe('Notes');
+  });
+
+  it('does not treat a number in the middle of a title as a counter', () => {
+    expect(uniqueTitle('Rome (753 BC) notes', ['Rome (753 BC) notes'])).toBe(
+      'Rome (753 BC) notes (1)'
+    );
+  });
+});
+
+describe('unique titles in the library', () => {
+  it('numbers a second canvas of the same name', () => {
+    createCanvas({ ownerEmail: ALICE });
+    const second = createCanvas({ ownerEmail: ALICE });
+    expect(titles(canvasesOwnedBy(ALICE)).sort()).toEqual([
+      'Untitled canvas',
+      'Untitled canvas (1)',
+    ]);
+    expect(second.title).toBe('Untitled canvas (1)');
+  });
+
+  it('numbers a template opened twice', () => {
+    createCanvas({ ownerEmail: ALICE, title: 'Photosynthesis' });
+    const again = createCanvas({ ownerEmail: ALICE, title: 'Photosynthesis' });
+    expect(again.title).toBe('Photosynthesis (1)');
+  });
+
+  it('scopes uniqueness to the owner — your names are not mine', () => {
+    createCanvas({ ownerEmail: ALICE, title: 'Rome' });
+    const bobs = createCanvas({ ownerEmail: BOB, title: 'Rome' });
+    expect(bobs.title).toBe('Rome');
+  });
+
+  it('renaming onto an existing name gets a counter too', () => {
+    createCanvas({ ownerEmail: ALICE, title: 'Rome' });
+    const other = createCanvas({ ownerEmail: ALICE, title: 'Carthage' });
+    expect(renameCanvas(other.id, 'Rome').title).toBe('Rome (1)');
+  });
+
+  it('renaming a canvas to its own name is not a collision with itself', () => {
+    const canvas = createCanvas({ ownerEmail: ALICE, title: 'Rome' });
+    expect(renameCanvas(canvas.id, 'Rome').title).toBe('Rome');
+  });
+
+  it('renaming an unknown id does nothing rather than throwing', () => {
+    expect(renameCanvas('nope', 'Rome')).toBeNull();
+  });
+
+  it('a name freed by a deletion becomes available again', () => {
+    const first = createCanvas({ ownerEmail: ALICE, title: 'Rome' });
+    deleteCanvas(first.id);
+    expect(createCanvas({ ownerEmail: ALICE, title: 'Rome' }).title).toBe('Rome');
   });
 });

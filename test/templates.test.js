@@ -95,3 +95,23 @@ describe('STARTER_TOPICS', () => {
     for (const topic of STARTER_TOPICS) expect(topic.trim()).not.toBe('');
   });
 });
+
+describe('template search text', () => {
+  it('flattens every block so library search can reach inside an example', () => {
+    for (const summary of listTemplates()) {
+      const graph = buildTemplateGraph(summary.key);
+      for (const node of graph.nodes) {
+        expect(summary.searchText, `${summary.key} / ${node.data.label}`).toContain(
+          node.data.label
+        );
+      }
+    }
+  });
+
+  it('includes the notes, not just the labels', () => {
+    const [first] = listTemplates();
+    const graph = buildTemplateGraph(first.key);
+    const notes = graph.nodes.find((n) => n.data.notes)?.data.notes;
+    expect(first.searchText).toContain(notes);
+  });
+});

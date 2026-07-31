@@ -188,6 +188,10 @@ export function listTemplates() {
     title,
     blurb,
     blockCount: blocks.length,
+    // Flattened block text, so library search reaches inside an example the same
+    // way it reaches inside your own canvases — otherwise searching "Apollo"
+    // finds nothing while the Cold War example sits there containing it.
+    searchText: blocks.map((b) => `${b.label} ${b.date ?? ''} ${b.notes ?? ''}`).join(' '),
   }));
 }
 

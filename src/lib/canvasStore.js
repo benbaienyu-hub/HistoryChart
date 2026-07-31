@@ -30,12 +30,53 @@ export function getCanvas(id) {
   return all().find((c) => c.id === id) ?? null;
 }
 
-export function createCanvas({ ownerEmail, title = 'Untitled canvas', nodes = [], edges = [] }) {
+export const DEFAULT_TITLE = 'Untitled canvas';
+
+// Two canvases called "Untitled canvas" are indistinguishable in the library, and
+// the library is how you find your work. So a colliding title gets a counter:
+// the second is "Untitled canvas (1)", the third "(2)".
+//
+// A title that already ends in a counter is renumbered rather than stacked —
+// duplicating "Notes (2)" gives "Notes (3)", not "Notes (2) (1)". Comparison is
+// case-insensitive: "notes" and "Notes" are the same name to a person reading a
+// list, whatever the string comparison says.
+const COUNTER = /\s\((\d+)\)$/;
+
+export function uniqueTitle(desired, taken) {
+  const wanted = String(desired ?? '').trim() || DEFAULT_TITLE;
+  const used = new Set((taken ?? []).map((t) => String(t ?? '').trim().toLowerCase()));
+  if (!used.has(wanted.toLowerCase())) return wanted;
+
+  const base = wanted.replace(COUNTER, '');
+  for (let n = 1; ; n++) {
+    const candidate = `${base} (${n})`;
+    if (!used.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+function titlesOwnedBy(owner, exceptId = null) {
+  return all()
+    .filter((c) => c.ownerEmail === owner && c.id !== exceptId)
+    .map((c) => c.title);
+}
+
+// Renaming goes through the same rule, so the invariant holds however a title
+// arrives — otherwise you could rename your way back into two identical names.
+export function renameCanvas(id, title) {
+  const canvas = getCanvas(id);
+  if (!canvas) return null;
+  return updateCanvas(id, {
+    title: uniqueTitle(title, titlesOwnedBy(canvas.ownerEmail, id)),
+  });
+}
+
+export function createCanvas({ ownerEmail, title = DEFAULT_TITLE, nodes = [], edges = [] }) {
   const now = Date.now();
+  const owner = normalizeEmail(ownerEmail);
   const canvas = {
     id: crypto.randomUUID(),
-    title,
-    ownerEmail: normalizeEmail(ownerEmail),
+    title: uniqueTitle(title, titlesOwnedBy(owner)),
+    ownerEmail: owner,
     sharedWith: [],
     nodes,
     edges,

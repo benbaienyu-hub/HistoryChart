@@ -217,6 +217,33 @@ import { handleKnowledgeRequest } from './server/knowledgeRoutes.js'
 app.post('/api/knowledge', handleKnowledgeRequest)
 ```
 
+## Finding a canvas again
+
+The library header has a search field, and it searches **content, not just
+titles** — canvas titles, block titles, and the notes inside them. That's the
+difference between a search that works and one that doesn't: the canvas you're
+looking for is called "History revision", and the word you remember is *Adwa*.
+
+- Multiple words are ANDed, but they don't have to match the same field — "ethiopia adwa" finds the canvas named Ethiopia containing a block about Adwa.
+- Title matches sort above content-only matches. Within each group, most recently updated stays first.
+- When a card matched on content, it says where: *Found in Adwa, Suez*. A title match needs no explanation, so it doesn't get one.
+- The sidebar counts become `matches/total` while a search is active, rather than claiming 12 canvases beside a grid showing two.
+- Examples are searched by their content too, via a flattened `searchText` built in `listTemplates()` — so "apollo" finds the Cold War example without building its graph on every keystroke.
+- Escape clears the field. If your search matches nothing in the tab you're on but does match in another, the empty state says so and offers to take you there — otherwise a match one tab away is invisible and the canvas looks deleted.
+
+## Titles are unique per person
+
+Two canvases called "Untitled canvas" are indistinguishable in a library, and the
+library is how you find your work — so a colliding title gets a counter: the
+second is `Untitled canvas (1)`, the third `(2)`. A few details that make it
+behave the way you'd expect:
+
+- A title already ending in a counter is renumbered, not stacked: duplicating `Notes (2)` gives `Notes (3)`, never `Notes (2) (1)`.
+- Gaps are filled — delete `Notes (1)` and the next collision reuses it.
+- Comparison is case-insensitive, because "notes" and "Notes" are the same name to a person reading a list.
+- Renaming goes through the same rule, so you can't rename your way back into two identical names.
+- Uniqueness is scoped to the owner. My "Rome" and your "Rome" don't collide.
+
 ## The logo
 
 The mark is `[- -]` — the editorial notation for an omission, which is how a
@@ -319,7 +346,8 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
-| `src/lib/canvasStore.js` | Canvas persistence (localStorage) |
+| `src/lib/canvasStore.js` | Canvas persistence (localStorage), and the unique-title rule |
+| `src/lib/canvasSearch.js` | Library search — matching, ranking, and highlight ranges |
 | `src/lib/migrate.js` | One-time move of pre-rename storage keys |
 | `src/lib/logoMark.js` | The logo's geometry — one source for the icon and the favicon |
 | `src/components/Logo.jsx` | The mark as a React component, in `currentColor` |

@@ -5,9 +5,15 @@ import {
   canvasesSharedWith,
   createCanvas,
   deleteCanvas,
-  updateCanvas,
+  renameCanvas,
 } from '../lib/canvasStore';
 import { categoryColor } from '../lib/categories';
+import {
+  highlightSegments,
+  parseQuery,
+  searchCanvases,
+  searchTemplates,
+} from '../lib/canvasSearch';
 import { buildTemplateGraph, listTemplates } from '../lib/templates';
 import Logo from './Logo';
 import ShareDialog from './ShareDialog';
@@ -81,6 +87,69 @@ function GraphThumbnail({ nodes, edges }) {
   );
 }
 
+// Marks the searched-for text inside a title, so a match is visible rather than
+// merely implied by the card still being on screen.
+function Highlight({ text, terms }) {
+  const segments = highlightSegments(text, terms);
+  if (segments.length === 1 && !segments[0].hit) return text;
+  return segments.map((segment, i) =>
+    segment.hit ? (
+      <mark key={i} className="rounded bg-accent/20 text-inherit">
+        {segment.text}
+      </mark>
+    ) : (
+      <span key={i}>{segment.text}</span>
+    )
+  );
+}
+
+function SearchField({ value, onChange }) {
+  return (
+    <div className="relative min-w-0 flex-1 sm:max-w-sm">
+      {/* Drawn rather than typed: the ⌕ character renders as a stray glyph at this
+          size in most UI fonts. */}
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 16 16"
+        className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subink"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      >
+        <circle cx="6.8" cy="6.8" r="4.3" />
+        <path d="M10.1 10.1 13.5 13.5" />
+      </svg>
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        // Escape clears rather than blurring: with a filter applied, getting back
+        // to the whole library is the thing you want, and it saves a trip to the ✕.
+        onKeyDown={(e) => {
+          if (e.key === 'Escape' && value) {
+            e.preventDefault();
+            onChange('');
+          }
+        }}
+        placeholder="Search canvases and notes…"
+        aria-label="Search canvases and notes"
+        className="w-full rounded-full border border-line2 bg-sunken py-1.5 pl-8 pr-8 text-[13px] text-ink placeholder:text-subink/70 focus:border-accent/40 focus:bg-panel focus:outline-none focus:ring-1 focus:ring-accent/25"
+      />
+      {value && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          aria-label="Clear search"
+          className="absolute right-2 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded-full text-[12px] text-subink hover:bg-hover hover:text-ink"
+        >
+          ✕
+        </button>
+      )}
+    </div>
+  );
+}
+
 function formatUpdated(ts) {
   const diff = Date.now() - ts;
   const mins = Math.round(diff / 60000);
@@ -93,7 +162,7 @@ function formatUpdated(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-function CanvasCard({ canvas, index, onOpen, actions }) {
+function CanvasCard({ canvas, index, onOpen, actions, terms = [], matchedBlocks = [] }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(canvas.title);
 
@@ -135,7 +204,7 @@ function CanvasCard({ canvas, index, onOpen, actions }) {
           onClick={() => onOpen(canvas.id)}
           className="truncate text-left text-[14px] font-semibold text-ink"
         >
-          {canvas.title}
+          <Highlight text={canvas.title} terms={terms} />
         </button>
       )}
 
@@ -144,6 +213,13 @@ function CanvasCard({ canvas, index, onOpen, actions }) {
         {formatUpdated(canvas.updatedAt)}
         {actions.readOnly && ` · from ${canvas.ownerEmail}`}
       </p>
+
+      {/* Why this card is in the results, when the title alone doesn't say. */}
+      {matchedBlocks.length > 0 && (
+        <p className="mt-1 truncate text-[11.5px] text-subink">
+          Found in <span className="text-ink/80">{matchedBlocks.join(', ')}</span>
+        </p>
+      )}
 
       {canvas.lastScore && (
         <p className="mt-1 text-[11.5px] text-accent">
@@ -221,6 +297,39 @@ function EmptyState({ title, body, action, secondary }) {
   );
 }
 
+// Shown instead of a grid when a search filters everything out. The point of the
+// `elsewhere` list is that a match in a tab you aren't looking at is otherwise
+// invisible — you conclude the canvas is gone.
+function NoMatches({ query, onClear, elsewhere, onGo }) {
+  return (
+    <div className="mt-6 rounded-2xl border border-dashed border-line2 bg-surface px-6 py-14 text-center">
+      <p className="text-[14px] text-ink">Nothing matches “{query.trim()}”</p>
+      <p className="mx-auto mt-1 max-w-md text-[13px] leading-snug text-subink">
+        Search covers canvas titles, block titles, and the notes inside them.
+      </p>
+      <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+        <button
+          type="button"
+          onClick={onClear}
+          className="rounded-full border border-line2 px-4 py-2 text-[13px] text-subink hover:bg-hover hover:text-ink"
+        >
+          Clear search
+        </button>
+        {elsewhere.map((t) => (
+          <button
+            key={t.key}
+            type="button"
+            onClick={() => onGo(t.key)}
+            className="rounded-full bg-accent-soft px-4 py-2 text-[13px] font-medium text-accent"
+          >
+            {t.count} in {t.label} →
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function Home({ user, onOpenCanvas, onSignOut }) {
   // Bumping this re-renders, which re-reads the store below after a mutation.
   const [, setVersion] = useState(0);
@@ -228,35 +337,50 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
   const [sharing, setSharing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [tab, setTab] = useState('mine');
+  const [query, setQuery] = useState('');
 
   const owned = canvasesOwnedBy(user.email);
   const shared = canvasesSharedWith(user.email);
   const templates = listTemplates();
 
+  const searching = parseQuery(query).length > 0;
+  const ownedResults = searchCanvases(owned, query);
+  const sharedResults = searchCanvases(shared, query);
+  const templateResults = searchTemplates(templates, query);
+
   const TABS = [
     {
       key: 'mine',
       label: 'Your canvases',
-      count: owned.length,
+      // While searching, the badge counts matches — otherwise the sidebar claims
+      // 12 canvases next to a grid showing two.
+      count: ownedResults.length,
+      total: owned.length,
       blurb: 'Pick up where you left off, or start something new.',
       hint: 'Canvases you own',
     },
     {
       key: 'shared',
       label: 'Shared with me',
-      count: shared.length,
+      count: sharedResults.length,
+      total: shared.length,
       blurb: 'Canvases other people gave you access to.',
       hint: 'Canvases shared with your email',
     },
     {
       key: 'examples',
       label: 'Examples',
-      count: templates.length,
+      count: templateResults.length,
+      total: templates.length,
       blurb: 'Pre-built canvases you can edit, extend, or study straight away.',
       hint: 'Starter canvases',
     },
   ];
   const active = TABS.find((t) => t.key === tab) ?? TABS[0];
+
+  // Searching the tab you're on and finding nothing, while the match sits in
+  // another tab, is a dead end you can't see out of. Name it instead.
+  const elsewhere = TABS.filter((t) => t.key !== tab && t.count > 0);
 
   function handleNew() {
     const canvas = createCanvas({ ownerEmail: user.email });
@@ -276,7 +400,7 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
   }
 
   function handleRename(id, title) {
-    updateCanvas(id, { title });
+    renameCanvas(id, title);
     refresh();
   }
 
@@ -300,7 +424,10 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
           <Logo size={21} className="text-accent" />
           <h1 className="text-[17px] font-semibold tracking-tight text-ink">Lacuna</h1>
         </div>
-        <div className="ml-auto flex items-center gap-2 sm:gap-3">
+
+        <SearchField value={query} onChange={setQuery} />
+
+        <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           <span className="hidden text-[12.5px] text-subink sm:block">{user.email}</span>
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-[12px] font-semibold text-accent">
@@ -318,7 +445,7 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
 
       <div className="mx-auto flex max-w-6xl gap-8 px-6 py-8">
         <nav className="sticky top-[61px] hidden h-fit w-48 shrink-0 md:block">
-          {TABS.map(({ key, label, count, hint }) => {
+          {TABS.map(({ key, label, count, total, hint }) => {
             const active = tab === key;
             return (
               <button
@@ -338,7 +465,7 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
                     active ? 'bg-accent/15 text-accent' : 'bg-sunken text-subink'
                   }`}
                 >
-                  {count}
+                  {searching ? `${count}/${total}` : count}
                 </span>
               </button>
             );
@@ -356,7 +483,7 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
         <main className="min-w-0 flex-1">
           {/* Tab strip for narrow screens, where the sidebar is hidden. */}
           <div className="mb-5 flex gap-1.5 overflow-x-auto md:hidden">
-            {TABS.map(({ key, label, count }) => (
+            {TABS.map(({ key, label, count, total }) => (
               <button
                 key={key}
                 type="button"
@@ -367,7 +494,7 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
                     : 'border border-line2 text-subink'
                 }`}
               >
-                {label} {count}
+                {label} {searching ? `${count}/${total}` : count}
               </button>
             ))}
           </div>
@@ -375,7 +502,11 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
           <div className="flex items-end justify-between gap-4">
             <div>
               <h2 className="text-[22px] font-semibold tracking-tight text-ink">{active.label}</h2>
-              <p className="mt-0.5 text-[13px] text-subink">{active.blurb}</p>
+              <p className="mt-0.5 text-[13px] text-subink">
+                {searching
+                  ? `${active.count} of ${active.total} match “${query.trim()}”`
+                  : active.blurb}
+              </p>
             </div>
             <motion.button
               type="button"
@@ -389,50 +520,66 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
           </div>
 
           {tab === 'mine' &&
-            (owned.length === 0 ? (
-              <EmptyState
-                title="No canvases yet"
-                body="Start blank and search a topic to drop your first block — or open one of the examples to see what a finished canvas looks like."
-                action={{ label: '+ New canvas', onClick: handleNew }}
-                secondary={{ label: 'Browse examples', onClick: () => setTab('examples') }}
-              />
+            (ownedResults.length === 0 ? (
+              searching ? (
+                <NoMatches query={query} onClear={() => setQuery('')} elsewhere={elsewhere} onGo={setTab} />
+              ) : (
+                <EmptyState
+                  title="No canvases yet"
+                  body="Start blank and search a topic to drop your first block — or open one of the examples to see what a finished canvas looks like."
+                  action={{ label: '+ New canvas', onClick: handleNew }}
+                  secondary={{ label: 'Browse examples', onClick: () => setTab('examples') }}
+                />
+              )
             ) : (
               <CardGrid>
-                {owned.map((canvas, i) => (
+                {ownedResults.map(({ canvas, terms, matchedBlocks }, i) => (
                   <CanvasCard
                     key={canvas.id}
                     canvas={canvas}
                     index={i}
                     onOpen={onOpenCanvas}
                     actions={ownedActions}
+                    terms={terms}
+                    matchedBlocks={matchedBlocks}
                   />
                 ))}
               </CardGrid>
             ))}
 
           {tab === 'shared' &&
-            (shared.length === 0 ? (
-              <EmptyState
-                title="Nothing shared with you yet"
-                body="When someone shares a canvas with your email, it shows up here. Sharing currently works between profiles in this same browser — it doesn’t send an invite email."
-              />
+            (sharedResults.length === 0 ? (
+              searching ? (
+                <NoMatches query={query} onClear={() => setQuery('')} elsewhere={elsewhere} onGo={setTab} />
+              ) : (
+                <EmptyState
+                  title="Nothing shared with you yet"
+                  body="When someone shares a canvas with your email, it shows up here. Sharing currently works between profiles in this same browser — it doesn’t send an invite email."
+                />
+              )
             ) : (
               <CardGrid>
-                {shared.map((canvas, i) => (
+                {sharedResults.map(({ canvas, terms, matchedBlocks }, i) => (
                   <CanvasCard
                     key={canvas.id}
                     canvas={canvas}
                     index={i}
                     onOpen={onOpenCanvas}
                     actions={{ readOnly: true }}
+                    terms={terms}
+                    matchedBlocks={matchedBlocks}
                   />
                 ))}
               </CardGrid>
             ))}
 
-          {tab === 'examples' && (
+          {tab === 'examples' && templateResults.length === 0 && (
+            <NoMatches query={query} onClear={() => setQuery('')} elsewhere={elsewhere} onGo={setTab} />
+          )}
+
+          {tab === 'examples' && templateResults.length > 0 && (
             <CardGrid>
-              {listTemplates().map((template, i) => {
+              {templateResults.map((template, i) => {
                 const preview = buildTemplateGraph(template.key);
                 return (
                   <motion.button
@@ -451,7 +598,9 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
                     className="flex flex-col rounded-2xl border border-dashed border-line2 bg-surface p-4 text-left transition-colors hover:border-accent/40"
                   >
                     <GraphThumbnail nodes={preview.nodes} edges={preview.edges} />
-                    <p className="mt-3 text-[14px] font-semibold text-ink">{template.title}</p>
+                    <p className="mt-3 text-[14px] font-semibold text-ink">
+                      <Highlight text={template.title} terms={parseQuery(query)} />
+                    </p>
                     <p className="mt-0.5 text-[11.5px] leading-snug text-subink">
                       {template.blurb}
                     </p>
