@@ -7,6 +7,7 @@ import {
   hasApiKey,
   isKnownLevel,
   mockEnabled,
+  normalizeContext,
 } from '../server/knowledgeRoutes.js';
 import { GRAPH_LEVELS } from '../src/lib/graphLevels.js';
 
@@ -155,6 +156,78 @@ describe('offline mode', () => {
     expect(status).toBe(200);
     expect(json.summary).toContain('[offline sample]');
     expect(json.summary).toContain('advanced');
+  });
+});
+
+describe('topic context', () => {
+  // The bug this exists for: a branch labelled "Geography" under a graph about
+  // Ethiopia came back as a dictionary definition of the word geography, because
+  // only the label was sent.
+  it('anchors the topic to the root subject', () => {
+    const prompt = buildPrompt({ topic: 'Geography', level: 'detailed', context: ['Ethiopia'] });
+    expect(prompt).toContain('Geography');
+    expect(prompt).toContain('Ethiopia');
+    expect(prompt).toMatch(/AS IT APPLIES TO Ethiopia/);
+  });
+
+  it('tells the model explicitly not to define the term', () => {
+    const prompt = buildPrompt({ topic: 'Geography', level: 'detailed', context: ['Ethiopia'] });
+    expect(prompt).toMatch(/Do not define the general concept/i);
+  });
+
+  it('extends the rule to the per-sub-topic details', () => {
+    // The leaves are built from this response, so their details need anchoring too.
+    const prompt = buildPrompt({ topic: 'Geography', level: 'detailed', context: ['Ethiopia'] });
+    expect(prompt).toMatch(/every "detail".*specific fact about Ethiopia/is);
+  });
+
+  it('names the intermediate path when there is one', () => {
+    const prompt = buildPrompt({
+      topic: 'Rift Valley',
+      level: 'detailed',
+      context: ['Ethiopia', 'Geography'],
+    });
+    expect(prompt).toContain('under Geography');
+    expect(prompt).toMatch(/APPLIES TO Ethiopia/);
+  });
+
+  it('says a root topic has nothing above it, rather than inventing a subject', () => {
+    const prompt = buildPrompt({ topic: 'Ethiopia', level: 'detailed' });
+    expect(prompt).toMatch(/top-level topic/i);
+    expect(prompt).not.toMatch(/AS IT APPLIES TO/);
+  });
+
+  it('serves the request through the route with context applied', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    const { status, json } = await call('POST', {
+      topic: 'Geography',
+      context: ['Ethiopia'],
+    });
+    expect(status).toBe(200);
+    expect(json.summary).toContain('Ethiopia');
+  });
+});
+
+describe('normalizeContext', () => {
+  it('keeps a clean chain in order', () => {
+    expect(normalizeContext(['Ethiopia', 'Geography'])).toEqual(['Ethiopia', 'Geography']);
+  });
+
+  it('trims, and drops blanks and non-strings', () => {
+    expect(normalizeContext(['  Ethiopia  ', '', '   ', 42, null, undefined, 'Geography'])).toEqual([
+      'Ethiopia',
+      'Geography',
+    ]);
+  });
+
+  it('returns an empty chain for anything that is not an array', () => {
+    for (const bad of [undefined, null, 'Ethiopia', 42, {}]) {
+      expect(normalizeContext(bad), String(bad)).toEqual([]);
+    }
+  });
+
+  it('caps the chain, so a malformed client cannot pad the prompt', () => {
+    expect(normalizeContext(Array.from({ length: 50 }, (_, i) => `a${i}`))).toHaveLength(6);
   });
 });
 

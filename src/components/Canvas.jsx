@@ -577,7 +577,15 @@ export default function Canvas({ user, canvasId, onExit }) {
         const branchId = branchIds[i];
         let result;
         try {
-          result = await expandTopic({ topic: branch.label, level: plan.key });
+          // The branch label alone is ambiguous: "Geography" under a graph about
+          // Ethiopia must not come back as a definition of geography. The root
+          // subject travels with the request, and governs the leaf details too,
+          // since those come from this same response.
+          result = await expandTopic({
+            topic: branch.label,
+            level: plan.key,
+            context: [topic],
+          });
         } catch {
           setNodes((prev) =>
             prev.map((n) =>

@@ -102,20 +102,25 @@ function seedFrom(text) {
   return Math.abs(h);
 }
 
-function mockKnowledge({ topic, notes, level }) {
+function mockKnowledge({ topic, notes, level, context }) {
+  const subject = normalizeContext(context)[0];
   // Offset the aspect list by the topic, otherwise every level picks the same
   // first aspect and a branch's children repeat their parent's label.
   const offset = seedFrom(topic);
   return {
     summary: (notes ?? '').trim()
       ? ''
-      : `[offline sample] Where a ${level} summary of ${topic} would go. Set OPENAI_MOCK=0 for real output.`,
+      : `[offline sample] A ${level} summary of ${topic}${
+          subject ? ` as it applies to ${subject}` : ''
+        } would go here. Set OPENAI_MOCK=0 for real output.`,
     correction: '',
     subtopics: MOCK_ASPECTS.map((_, i) => {
       const aspect = MOCK_ASPECTS[(offset + i) % MOCK_ASPECTS.length];
       return {
         label: `${topic} — ${aspect}`,
-        detail: `[offline sample] One line on the ${aspect} of ${topic} would go here.`,
+        detail: `[offline sample] One specific fact about the ${aspect} of ${
+          subject ? `${topic}, within ${subject},` : topic
+        } would go here.`,
       };
     }),
   };
@@ -124,6 +129,8 @@ function mockKnowledge({ topic, notes, level }) {
 const SYSTEM = `You help someone build a knowledge map. They give you a topic, whatever notes they have written, and the sub-topics already on their canvas.
 
 Be accurate and specific. Prefer concrete names, dates, and numbers over hedged generalities.
+
+A topic may be given with the subject it sits under. When it is, everything you write must be about the topic within that subject — never a general definition of the topic's name.
 
 Only populate "correction" when the notes contain a genuine factual error — a wrong date, a wrong causal claim, a wrong attribution. Say what is wrong and what is actually the case. Incomplete notes are not an error; leave "correction" empty for those.
 
@@ -166,13 +173,31 @@ function describeKeyFaults(key) {
   return faults.join('; ');
 }
 
-export function buildPrompt({ topic, notes, childLabels, level }) {
+// `context` is the chain of ancestor labels, outermost first — ['Ethiopia'] for a
+// branch of an Ethiopia graph. Without it a branch labelled "Geography" reads as
+// a request to define the word geography, and that is exactly what comes back.
+export function normalizeContext(context) {
+  return (Array.isArray(context) ? context : [])
+    .filter((c) => typeof c === 'string')
+    .map((c) => c.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+export function buildPrompt({ topic, notes, childLabels, level, context }) {
   const trimmedNotes = (notes ?? '').trim();
   const existing = (childLabels ?? []).filter(Boolean);
   const guidance = LEVEL_GUIDANCE[level] ?? LEVEL_GUIDANCE[DEFAULT_LEVEL];
+  const path = normalizeContext(context);
+  const subject = path[0];
 
   return [
     `Topic: ${topic}`,
+    subject
+      ? `This topic is part of a knowledge map about "${subject}"${
+          path.length > 1 ? `, under ${path.slice(1).join(' → ')}` : ''
+        }. Write about ${topic} AS IT APPLIES TO ${subject}. Do not define the general concept of "${topic}" — a definition of the term is useless here. The same rule applies to every "detail" you return: each must be a specific fact about ${subject}.`
+      : 'This is a top-level topic, with nothing above it.',
     trimmedNotes
       ? `The user's notes:\n"""\n${trimmedNotes}\n"""`
       : 'The user has not written any notes yet.',
@@ -183,8 +208,9 @@ export function buildPrompt({ topic, notes, childLabels, level }) {
   ].join('\n\n');
 }
 
-export async function generateKnowledge({ topic, notes, childLabels, level }) {
-  if (mockEnabled()) return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL });
+export async function generateKnowledge({ topic, notes, childLabels, level, context }) {
+  if (mockEnabled())
+    return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL, context });
 
   const apiKey = readKey();
   if (!apiKey) {
@@ -199,7 +225,7 @@ export async function generateKnowledge({ topic, notes, childLabels, level }) {
     model: readModel(),
     messages: [
       { role: 'system', content: SYSTEM },
-      { role: 'user', content: buildPrompt({ topic, notes, childLabels, level }) },
+      { role: 'user', content: buildPrompt({ topic, notes, childLabels, level, context }) },
     ],
     response_format: {
       type: 'json_schema',
@@ -285,6 +311,7 @@ export async function handleKnowledgeRequest(req, res) {
       notes: typeof body.notes === 'string' ? body.notes : '',
       childLabels: Array.isArray(body.childLabels) ? body.childLabels : [],
       level,
+      context: normalizeContext(body.context),
     });
     send(res, 200, result);
   } catch (error) {

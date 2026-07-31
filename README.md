@@ -58,6 +58,12 @@ With a key set:
 
   A side effect worth knowing: since study mode draws on any block with notes, a
   generated graph is immediately a deck of 10, 21 or 31 cards.
+
+  Each request carries the subject it sits under, not just its own label. A
+  branch called "Geography" in an Ethiopia graph would otherwise come back as a
+  definition of the word *geography* — the label alone is ambiguous, and the
+  model has no way to know better. The root subject travels with the request and
+  governs the sub-topic details too.
 - Pressing **Enter** instead adds just one block, which still fetches its own
   summary and suggested sub-topics.
 - **Fill my knowledge** reviews each root topic's notes, flags factual errors,
