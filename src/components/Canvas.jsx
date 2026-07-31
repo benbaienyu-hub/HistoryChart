@@ -5,12 +5,14 @@ import { useNodesState, useEdgesState } from 'reactflow';
 import KnowledgeBlock from './KnowledgeBlock';
 import ShareDialog from './ShareDialog';
 import RelationDialog from './RelationDialog';
+import GraphLevelMenu from './GraphLevelMenu';
 import StudyMode from './StudyMode';
 import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
 import { getCanvas, updateCanvas } from '../lib/canvasStore';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
 import { descendantIds, withVisibility } from '../lib/graph';
+import { graphPlan } from '../lib/graphLevels';
 import { STARTER_TOPICS } from '../lib/templates';
 import { useTheme } from '../lib/theme';
 import ThemeToggle from './ThemeToggle';
@@ -64,10 +66,8 @@ function makeEdge(sourceId, targetId) {
   return styleEdge({ id: `e-${sourceId}-${targetId}`, source: sourceId, target: targetId });
 }
 
-// How much graph "Make a graph" generates. One request per root plus one per
-// branch, so this is 1 + MAX_BRANCHES requests — keep it modest.
-const MAX_BRANCHES = 5;
-const MAX_LEAVES_PER_BRANCH = 3;
+// How much graph "Make a graph" generates is chosen per-run from the depth menu
+// — see src/lib/graphLevels.js for the counts and what each level costs.
 
 // Strip React callbacks and transient UI flags so a graph can be stored in
 // localStorage or pushed onto the undo stack.
@@ -140,6 +140,8 @@ export default function Canvas({ user, canvasId, onExit }) {
   const [studying, setStudying] = useState(false);
   const [aiReady, setAiReady] = useState(false);
   const [graphProgress, setGraphProgress] = useState(null);
+  const [levelMenuOpen, setLevelMenuOpen] = useState(false);
+  const levelButtonRef = useRef(null);
   const theme = useTheme();
   // These two React Flow props are passed to canvas/SVG attributes that
   // don't resolve CSS variables, so pick literals per theme.
@@ -487,10 +489,12 @@ export default function Canvas({ user, canvasId, onExit }) {
   // action — root with a summary, branches with their own summaries, and a
   // layer of leaves under each. One pushHistory() up front means the whole
   // thing collapses to a single undo step.
-  async function handleMakeGraph() {
+  async function handleMakeGraph(levelKey) {
     const topic = searchValue.trim();
     if (!topic || graphProgress) return;
 
+    const plan = graphPlan(levelKey);
+    setLevelMenuOpen(false);
     setSearchValue('');
     pushHistory();
     setGraphProgress({ done: 0, total: 1 });
@@ -520,13 +524,13 @@ export default function Canvas({ user, canvasId, onExit }) {
 
     let root;
     try {
-      root = await expandTopic({ topic });
+      root = await expandTopic({ topic, level: plan.key });
     } catch (error) {
       failRoot(`Couldn’t build the graph: ${error.message}`);
       return;
     }
 
-    const branches = root.subtopics.slice(0, MAX_BRANCHES);
+    const branches = root.subtopics.slice(0, plan.branches);
     setGraphProgress({ done: 1, total: 1 + branches.length });
 
     // Land the root's own content, then the branch shells so the user watches
@@ -571,7 +575,7 @@ export default function Canvas({ user, canvasId, onExit }) {
         const branchId = branchIds[i];
         let result;
         try {
-          result = await expandTopic({ topic: label });
+          result = await expandTopic({ topic: label, level: plan.key });
         } catch {
           setNodes((prev) =>
             prev.map((n) =>
@@ -582,7 +586,11 @@ export default function Canvas({ user, canvasId, onExit }) {
           return;
         }
 
-        const leaves = result.subtopics.slice(0, MAX_LEAVES_PER_BRANCH);
+        // The third level is created from the branch's suggested sub-topics but
+        // deliberately left blank — no summary is requested for it. These are the
+        // gaps the canvas has found for you to fill in, which is the whole point;
+        // writing them for you would defeat it.
+        const leaves = result.subtopics.slice(0, plan.leaves);
         const leafIds = leaves.map(() => crypto.randomUUID());
 
         setNodes((prev) => [
@@ -852,23 +860,55 @@ export default function Canvas({ user, canvasId, onExit }) {
             title="Enter adds a single block. “Make a graph” builds a whole branch."
             className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink placeholder:text-subink/70 focus:outline-none"
           />
-          <motion.button
-            type="button"
-            onClick={handleMakeGraph}
-            disabled={!searchValue.trim() || !aiReady || Boolean(graphProgress)}
-            whileHover={{ scale: 1.02 }}
-            whileTap={{ scale: 0.97 }}
-            title={
-              aiReady
-                ? 'Generate a full multi-level graph for this topic'
-                : 'Needs an OpenAI API key — see .env.example'
-            }
-            className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-[12px] font-medium text-white shadow-[0_1px_4px_rgba(0,113,227,0.3)] transition-opacity disabled:cursor-not-allowed disabled:bg-subink/25 disabled:shadow-none"
-          >
-            {graphProgress
-              ? `Building ${graphProgress.done}/${graphProgress.total}…`
-              : '✦ Make a graph'}
-          </motion.button>
+          <div className="relative shrink-0">
+            <motion.button
+              ref={levelButtonRef}
+              type="button"
+              onClick={() => setLevelMenuOpen((v) => !v)}
+              disabled={!searchValue.trim() || !aiReady || Boolean(graphProgress)}
+              aria-haspopup="menu"
+              aria-expanded={levelMenuOpen}
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              title={
+                aiReady
+                  ? 'Generate a full multi-level graph — choose how deep'
+                  : 'Needs an OpenAI API key — see .env.example'
+              }
+              className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-[12px] font-medium text-white shadow-[0_1px_4px_rgba(0,113,227,0.3)] transition-opacity disabled:cursor-not-allowed disabled:bg-subink/25 disabled:shadow-none"
+            >
+              {graphProgress ? (
+                `Building ${graphProgress.done}/${graphProgress.total}…`
+              ) : (
+                <>
+                  ✦ Make a graph
+                  <motion.svg
+                    width="9"
+                    height="9"
+                    viewBox="0 0 10 10"
+                    fill="none"
+                    animate={{ rotate: levelMenuOpen ? 180 : 0 }}
+                    transition={{ duration: 0.16 }}
+                  >
+                    <path
+                      d="M2 3.5L5 6.5l3-3"
+                      stroke="currentColor"
+                      strokeWidth="1.7"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </motion.svg>
+                </>
+              )}
+            </motion.button>
+
+            <GraphLevelMenu
+              open={levelMenuOpen && !graphProgress}
+              onChoose={handleMakeGraph}
+              onClose={() => setLevelMenuOpen(false)}
+              anchorRef={levelButtonRef}
+            />
+          </div>
         </form>
 
         <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-line bg-sunken p-0.5">

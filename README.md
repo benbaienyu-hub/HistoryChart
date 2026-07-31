@@ -39,9 +39,21 @@ Get a key from the [OpenAI dashboard](https://platform.openai.com/api-keys).
 With a key set:
 
 - **Make a graph** (the button inside the search bar) generates a whole
-  multi-level graph for one topic in a single click: the root with a summary,
-  up to 5 branches each with their own summary, and up to 3 sub-topics under
-  each branch. It's one undo step, so ⌘Z removes the whole thing.
+  three-level graph for one topic. Clicking it asks how deep you want to go:
+
+  | | Branches | Sub-topics each | Blocks | Requests |
+  | --- | --- | --- | --- | --- |
+  | **Simple** | 3 | 2 | 10 | 4 |
+  | **Detailed** | 5 | 3 | 21 | 6 |
+  | **Advanced** | 6 | 4 | 31 | 7 |
+
+  The level changes the writing as well as the size: Simple explains terms and
+  keeps summaries to a sentence, Advanced assumes you know the basics and goes
+  for precision. The whole graph is a single undo step, so ⌘Z removes all of it.
+
+  The **third level always arrives empty**. Those blocks are the gaps — things
+  the canvas has decided are worth knowing but hasn't told you about. Filling
+  them in is the point of the app, so generating their text would defeat it.
 - Pressing **Enter** instead adds just one block, which still fetches its own
   summary and suggested sub-topics.
 - **Fill my knowledge** reviews each root topic's notes, flags factual errors,
@@ -61,6 +73,18 @@ gitignored.
 
 Note that a real environment variable takes precedence over `.env`; if
 `OPENAI_API_KEY` is already exported in your shell, that value wins.
+
+### Running without a key, on purpose
+
+```bash
+OPENAI_MOCK=1 npm run dev
+```
+
+Offline mode: every AI feature answers with deterministic sample content and
+nothing is sent to OpenAI. Useful when building the UI, and for demoing on a
+laptop with no network and no bill. Every summary it writes is prefixed
+`[offline sample]`, so it can't be mistaken for real output, and the dev server
+says so once at startup.
 
 ### When the key doesn't work
 
@@ -136,6 +160,8 @@ hardcode white or black and both themes stay in sync.
 | `src/components/StudyMode.jsx` | Flashcards generated from your notes |
 | `src/components/Home.jsx` | Canvas library sidebar (Your canvases / Shared with me / Examples) |
 | `src/lib/graph.js` | Pure tree helpers — descendants, collapse visibility |
+| `src/lib/graphLevels.js` | The Simple / Detailed / Advanced depths and their sizing |
+| `src/components/GraphLevelMenu.jsx` | The depth picker that drops out of "Make a graph" |
 | `src/lib/layout.js` | Tidy-tree layout over the `parentId` forest |
 | `src/lib/deck.js` | Flashcard selection and deterministic shuffle |
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |

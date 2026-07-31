@@ -32,12 +32,72 @@ const KNOWLEDGE_SCHEMA = {
       type: 'array',
       items: { type: 'string' },
       description:
-        'Up to 5 short labels (a few words each) for sub-topics worth exploring next. Omit any the user already has.',
+        'Up to 8 short labels (a few words each) for sub-topics worth exploring next, most important first. Omit any the user already has.',
     },
   },
   required: ['summary', 'correction', 'subtopics'],
   additionalProperties: false,
 };
+
+// The three depths the "Make a graph" menu offers. The level changes how the
+// model writes, not just how much the client draws — a Simple graph should be
+// readable by someone new to the subject, an Advanced one should not waste words
+// explaining the basics. Mirrors src/lib/graphLevels.js, which owns the
+// client-side counts.
+const LEVEL_GUIDANCE = {
+  simple: `Write for someone meeting this subject for the first time. Keep "summary" to a single plain sentence, avoid jargon, and where a term is unavoidable, gloss it. For "subtopics", choose the few most fundamental parts of the subject.`,
+  detailed: `Write for someone studying this subject seriously. Keep "summary" to at most two sentences, but make them carry specifics — names, dates, numbers. For "subtopics", cover the main branches of the subject.`,
+  advanced: `Write for someone who already knows the basics. Do not explain elementary terms. Keep "summary" to at most two dense sentences, and prefer precise, technical, specific content over general orientation. For "subtopics", include the less obvious branches a newcomer's overview would leave out.`,
+};
+
+const DEFAULT_LEVEL = 'detailed';
+
+export function isKnownLevel(level) {
+  return Object.hasOwn(LEVEL_GUIDANCE, level);
+}
+
+// Offline mode: OPENAI_MOCK=1 makes every route answer with deterministic sample
+// content and never contact OpenAI. It exists so the graph generator can be
+// exercised end to end — in tests, in a browser, or in a live demo — without a
+// key, a network, or a bill. Every summary it produces is prefixed so it can
+// never be mistaken for real output.
+export function mockEnabled() {
+  const value = process.env.OPENAI_MOCK?.trim().toLowerCase();
+  return value === '1' || value === 'true';
+}
+
+const MOCK_ASPECTS = [
+  'origins',
+  'key figures',
+  'turning points',
+  'consequences',
+  'primary sources',
+  'open debates',
+  'timeline',
+  'legacy',
+];
+
+// Deterministic, so the same topic always yields the same sample graph.
+function seedFrom(text) {
+  let h = 0;
+  for (const ch of text) h = (h * 31 + ch.charCodeAt(0)) | 0;
+  return Math.abs(h);
+}
+
+function mockKnowledge({ topic, notes, level }) {
+  // Offset the aspect list by the topic, otherwise every level picks the same
+  // first aspect and a branch's children repeat their parent's label.
+  const offset = seedFrom(topic);
+  return {
+    summary: (notes ?? '').trim()
+      ? ''
+      : `[offline sample] Where a ${level} summary of ${topic} would go. Set OPENAI_MOCK=0 for real output.`,
+    correction: '',
+    subtopics: MOCK_ASPECTS.map(
+      (_, i) => `${topic} — ${MOCK_ASPECTS[(offset + i) % MOCK_ASPECTS.length]}`
+    ),
+  };
+}
 
 const SYSTEM = `You help someone build a knowledge map. They give you a topic, whatever notes they have written, and the sub-topics already on their canvas.
 
@@ -84,9 +144,10 @@ function describeKeyFaults(key) {
   return faults.join('; ');
 }
 
-function buildPrompt({ topic, notes, childLabels }) {
+export function buildPrompt({ topic, notes, childLabels, level }) {
   const trimmedNotes = (notes ?? '').trim();
   const existing = (childLabels ?? []).filter(Boolean);
+  const guidance = LEVEL_GUIDANCE[level] ?? LEVEL_GUIDANCE[DEFAULT_LEVEL];
 
   return [
     `Topic: ${topic}`,
@@ -96,10 +157,13 @@ function buildPrompt({ topic, notes, childLabels }) {
     existing.length
       ? `Sub-topics already on their canvas: ${existing.join(', ')}`
       : 'They have no sub-topics on this branch yet.',
+    `Level: ${guidance}`,
   ].join('\n\n');
 }
 
-export async function generateKnowledge({ topic, notes, childLabels }) {
+export async function generateKnowledge({ topic, notes, childLabels, level }) {
+  if (mockEnabled()) return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL });
+
   const apiKey = readKey();
   if (!apiKey) {
     const error = new Error('OPENAI_API_KEY is not set');
@@ -113,7 +177,7 @@ export async function generateKnowledge({ topic, notes, childLabels }) {
     model: readModel(),
     messages: [
       { role: 'system', content: SYSTEM },
-      { role: 'user', content: buildPrompt({ topic, notes, childLabels }) },
+      { role: 'user', content: buildPrompt({ topic, notes, childLabels, level }) },
     ],
     response_format: {
       type: 'json_schema',
@@ -136,10 +200,12 @@ export async function generateKnowledge({ topic, notes, childLabels }) {
   return {
     summary: (parsed.summary ?? '').trim(),
     correction: (parsed.correction ?? '').trim(),
+    // Eight is the ceiling the schema asks for; the client takes as many as the
+    // chosen level calls for.
     subtopics: (parsed.subtopics ?? [])
       .map((s) => String(s).trim())
       .filter(Boolean)
-      .slice(0, 5),
+      .slice(0, 8),
   };
 }
 
@@ -182,11 +248,17 @@ export async function handleKnowledgeRequest(req, res) {
     return;
   }
 
+  // An unknown level falls back rather than erroring: the level only shapes the
+  // wording, so a stale client asking for one we dropped should still get a
+  // usable answer.
+  const level = isKnownLevel(body.level) ? body.level : DEFAULT_LEVEL;
+
   try {
     const result = await generateKnowledge({
       topic,
       notes: typeof body.notes === 'string' ? body.notes : '',
       childLabels: Array.isArray(body.childLabels) ? body.childLabels : [],
+      level,
     });
     send(res, 200, result);
   } catch (error) {
@@ -241,9 +313,18 @@ export function knowledgeApiPlugin() {
   return {
     name: 'lacuna-knowledge-api',
     configureServer(server) {
+      if (mockEnabled()) {
+        console.log(
+          '[knowledge] OPENAI_MOCK is on — returning offline sample data, not calling OpenAI.'
+        );
+      }
       server.middlewares.use('/api/knowledge', handleKnowledgeRequest);
       server.middlewares.use('/api/knowledge-status', (req, res) => {
-        send(res, 200, { configured: hasApiKey(), model: readModel() });
+        send(res, 200, {
+          configured: hasApiKey() || mockEnabled(),
+          model: mockEnabled() ? 'offline sample data' : readModel(),
+          mock: mockEnabled(),
+        });
       });
     },
   };

@@ -26,11 +26,11 @@ const PLACEHOLDER = {
   subtopics: ['Suggested subtopic (connect AI)'],
 };
 
-async function requestKnowledge({ topic, notes, childLabels }) {
+async function requestKnowledge({ topic, notes, childLabels, level }) {
   const response = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ topic, notes, childLabels }),
+    body: JSON.stringify({ topic, notes, childLabels, level }),
   });
 
   if (response.status === 503) {
@@ -44,10 +44,11 @@ async function requestKnowledge({ topic, notes, childLabels }) {
   return response.json();
 }
 
-// Called when a brand-new root block is created: fetch a summary plus
-// suggested subtopics so the block doesn't arrive empty.
-export async function expandTopic({ topic }) {
-  const result = await requestKnowledge({ topic, notes: '', childLabels: [] });
+// Called when a brand-new root block is created, and for each branch of a
+// generated graph: fetch a summary plus suggested subtopics so the block doesn't
+// arrive empty. `level` decides how the summary is pitched.
+export async function expandTopic({ topic, level }) {
+  const result = await requestKnowledge({ topic, notes: '', childLabels: [], level });
   return {
     summary: result.summary ?? '',
     subtopics: result.subtopics ?? [],
