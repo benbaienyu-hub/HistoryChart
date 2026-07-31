@@ -102,6 +102,12 @@ describe('offline mode', () => {
     expect(summary).toContain('OPENAI_MOCK');
   });
 
+  it('shapes sub-topics as { label, detail }', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    const { subtopics } = await generateKnowledge({ topic: 'Rome' });
+    expect(Object.keys(subtopics[0]).sort()).toEqual(['detail', 'label']);
+  });
+
   it('returns enough sub-topics for the widest level', async () => {
     vi.stubEnv('OPENAI_MOCK', '1');
     const { subtopics } = await generateKnowledge({ topic: 'Rome' });
@@ -115,7 +121,7 @@ describe('offline mode', () => {
     const b = await generateKnowledge({ topic: 'Rome' });
     const c = await generateKnowledge({ topic: 'Carthage' });
     expect(a.subtopics).toEqual(b.subtopics);
-    expect(a.subtopics[0]).not.toBe(c.subtopics[0]);
+    expect(a.subtopics[0].label).not.toBe(c.subtopics[0].label);
   });
 
   it('does not repeat a branch label in its own children', async () => {
@@ -123,9 +129,18 @@ describe('offline mode', () => {
     // broken rather than merely fake.
     vi.stubEnv('OPENAI_MOCK', '1');
     const root = await generateKnowledge({ topic: 'Rome' });
-    const branch = root.subtopics[0];
+    const branch = root.subtopics[0].label;
     const child = await generateKnowledge({ topic: branch });
-    expect(child.subtopics).not.toContain(branch);
+    expect(child.subtopics.map((s) => s.label)).not.toContain(branch);
+  });
+
+  it('gives every sample sub-topic a detail line, so leaves are never blank', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    const { subtopics } = await generateKnowledge({ topic: 'Rome' });
+    for (const s of subtopics) {
+      expect(s.label).toBeTruthy();
+      expect(s.detail).toBeTruthy();
+    }
   });
 
   it('leaves the user’s own notes alone', async () => {

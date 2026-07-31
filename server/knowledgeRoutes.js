@@ -28,11 +28,29 @@ const KNOWLEDGE_SCHEMA = {
       description:
         "A specific correction to the user's notes, naming what is wrong and what is actually true. Empty string if the notes contain no factual errors.",
     },
+    // Each sub-topic carries its own one-line description. This is what lets the
+    // third level of a generated graph arrive with content in it: the leaves are
+    // built from their parent's response, so filling them costs no extra request.
     subtopics: {
       type: 'array',
-      items: { type: 'string' },
+      items: {
+        type: 'object',
+        properties: {
+          label: {
+            type: 'string',
+            description: 'A short label, a few words at most. No trailing punctuation.',
+          },
+          detail: {
+            type: 'string',
+            description:
+              'One sentence saying what this sub-topic is and why it matters to the parent topic. Specific, not a restatement of the label.',
+          },
+        },
+        required: ['label', 'detail'],
+        additionalProperties: false,
+      },
       description:
-        'Up to 8 short labels (a few words each) for sub-topics worth exploring next, most important first. Omit any the user already has.',
+        'Up to 8 sub-topics worth exploring next, most important first. Omit any the user already has.',
     },
   },
   required: ['summary', 'correction', 'subtopics'],
@@ -45,9 +63,9 @@ const KNOWLEDGE_SCHEMA = {
 // explaining the basics. Mirrors src/lib/graphLevels.js, which owns the
 // client-side counts.
 const LEVEL_GUIDANCE = {
-  simple: `Write for someone meeting this subject for the first time. Keep "summary" to a single plain sentence, avoid jargon, and where a term is unavoidable, gloss it. For "subtopics", choose the few most fundamental parts of the subject.`,
-  detailed: `Write for someone studying this subject seriously. Keep "summary" to at most two sentences, but make them carry specifics — names, dates, numbers. For "subtopics", cover the main branches of the subject.`,
-  advanced: `Write for someone who already knows the basics. Do not explain elementary terms. Keep "summary" to at most two dense sentences, and prefer precise, technical, specific content over general orientation. For "subtopics", include the less obvious branches a newcomer's overview would leave out.`,
+  simple: `Write for someone meeting this subject for the first time. Keep "summary" to a single plain sentence, avoid jargon, and where a term is unavoidable, gloss it. For "subtopics", choose the few most fundamental parts of the subject, and keep each "detail" to one short, plain sentence.`,
+  detailed: `Write for someone studying this subject seriously. Keep "summary" to at most two sentences, but make them carry specifics — names, dates, numbers. For "subtopics", cover the main branches of the subject, and make each "detail" a concrete sentence rather than a definition.`,
+  advanced: `Write for someone who already knows the basics. Do not explain elementary terms. Keep "summary" to at most two dense sentences, and prefer precise, technical, specific content over general orientation. For "subtopics", include the less obvious branches a newcomer's overview would leave out, and make each "detail" carry a specific fact.`,
 };
 
 const DEFAULT_LEVEL = 'detailed';
@@ -93,9 +111,13 @@ function mockKnowledge({ topic, notes, level }) {
       ? ''
       : `[offline sample] Where a ${level} summary of ${topic} would go. Set OPENAI_MOCK=0 for real output.`,
     correction: '',
-    subtopics: MOCK_ASPECTS.map(
-      (_, i) => `${topic} — ${MOCK_ASPECTS[(offset + i) % MOCK_ASPECTS.length]}`
-    ),
+    subtopics: MOCK_ASPECTS.map((_, i) => {
+      const aspect = MOCK_ASPECTS[(offset + i) % MOCK_ASPECTS.length];
+      return {
+        label: `${topic} — ${aspect}`,
+        detail: `[offline sample] One line on the ${aspect} of ${topic} would go here.`,
+      };
+    }),
   };
 }
 
@@ -107,7 +129,7 @@ Only populate "correction" when the notes contain a genuine factual error — a 
 
 Only populate "summary" when the notes are empty or say almost nothing. If the user has already written a reasonable account, leave it empty — do not overwrite their words.
 
-For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas.`;
+For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas. Give each one a short label and a single sentence of substance — the sentence is shown to the user as the starting content of that block, so it must say something, not merely restate the label.`;
 
 function readKey() {
   return process.env.OPENAI_API_KEY?.trim() || null;
@@ -201,10 +223,14 @@ export async function generateKnowledge({ topic, notes, childLabels, level }) {
     summary: (parsed.summary ?? '').trim(),
     correction: (parsed.correction ?? '').trim(),
     // Eight is the ceiling the schema asks for; the client takes as many as the
-    // chosen level calls for.
+    // chosen level calls for. A sub-topic with no label is unusable; one with no
+    // detail is merely thin, so it survives.
     subtopics: (parsed.subtopics ?? [])
-      .map((s) => String(s).trim())
-      .filter(Boolean)
+      .map((s) => ({
+        label: String(s?.label ?? '').trim(),
+        detail: String(s?.detail ?? '').trim(),
+      }))
+      .filter((s) => s.label)
       .slice(0, 8),
   };
 }

@@ -51,9 +51,13 @@ With a key set:
   keeps summaries to a sentence, Advanced assumes you know the basics and goes
   for precision. The whole graph is a single undo step, so ⌘Z removes all of it.
 
-  The **third level always arrives empty**. Those blocks are the gaps — things
-  the canvas has decided are worth knowing but hasn't told you about. Filling
-  them in is the point of the app, so generating their text would defeat it.
+  **Every block arrives with something in it, including the third level.** That
+  costs no extra requests: each response returns its sub-topics as a label *plus*
+  a one-line description, so a branch's children are built from the branch's own
+  reply. It's why Detailed needs 6 requests for 21 blocks rather than 21.
+
+  A side effect worth knowing: since study mode draws on any block with notes, a
+  generated graph is immediately a deck of 10, 21 or 31 cards.
 - Pressing **Enter** instead adds just one block, which still fetches its own
   summary and suggested sub-topics.
 - **Fill my knowledge** reviews each root topic's notes, flags factual errors,

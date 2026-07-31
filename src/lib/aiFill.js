@@ -23,7 +23,7 @@ export function isAiConfigured() {
 const PLACEHOLDER = {
   summary: 'Connect an OpenAI API key to generate a real summary here.',
   correction: 'Connect an OpenAI API key to fact-check these notes.',
-  subtopics: ['Suggested subtopic (connect AI)'],
+  subtopics: [{ label: 'Suggested subtopic (connect AI)', detail: '' }],
 };
 
 async function requestKnowledge({ topic, notes, childLabels, level }) {
@@ -44,14 +44,24 @@ async function requestKnowledge({ topic, notes, childLabels, level }) {
   return response.json();
 }
 
+// Sub-topics arrive as { label, detail }. Tolerate a bare string too, so a
+// response from an older server still produces usable blocks rather than labels
+// reading "[object Object]".
+export function normalizeSubtopics(list) {
+  return (list ?? [])
+    .map((s) => (typeof s === 'string' ? { label: s, detail: '' } : s))
+    .map((s) => ({ label: String(s?.label ?? '').trim(), detail: String(s?.detail ?? '').trim() }))
+    .filter((s) => s.label);
+}
+
 // Called when a brand-new root block is created, and for each branch of a
-// generated graph: fetch a summary plus suggested subtopics so the block doesn't
+// generated graph: fetch a summary plus suggested sub-topics so the block doesn't
 // arrive empty. `level` decides how the summary is pitched.
 export async function expandTopic({ topic, level }) {
   const result = await requestKnowledge({ topic, notes: '', childLabels: [], level });
   return {
     summary: result.summary ?? '',
-    subtopics: result.subtopics ?? [],
+    subtopics: normalizeSubtopics(result.subtopics),
     placeholder: Boolean(result.placeholder),
     refused: Boolean(result.refused),
   };
@@ -67,7 +77,7 @@ export async function fillKnowledge({ topic, notes, childLabels }) {
     // Never overwrite notes the user actually wrote.
     filledNotes: hasNotes ? null : result.summary || null,
     correction: result.correction || null,
-    suggestedSubtopics: result.subtopics ?? [],
+    suggestedSubtopics: normalizeSubtopics(result.subtopics),
     placeholder: Boolean(result.placeholder),
     refused: Boolean(result.refused),
   };

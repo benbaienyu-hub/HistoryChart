@@ -550,14 +550,16 @@ export default function Canvas({ user, canvasId, onExit }) {
             }
           : n
       ),
-      ...branches.map((label, i) =>
+      // The branch's own detail line shows immediately, so the block says
+      // something while its fuller summary is still being fetched.
+      ...branches.map((branch, i) =>
         makeNode({
           id: branchIds[i],
           x: rootX + i * CHILD_SPACING,
           y: 90 + LEVEL_HEIGHT,
-          label,
+          label: branch.label,
           parentId: rootId,
-          extra: { loading: true },
+          extra: { loading: true, notes: branch.detail, aiFilled: Boolean(branch.detail) },
         })
       ),
     ]);
@@ -571,11 +573,11 @@ export default function Canvas({ user, canvasId, onExit }) {
 
     // Expand each branch concurrently, patching the canvas as each lands.
     await Promise.all(
-      branches.map(async (label, i) => {
+      branches.map(async (branch, i) => {
         const branchId = branchIds[i];
         let result;
         try {
-          result = await expandTopic({ topic: label, level: plan.key });
+          result = await expandTopic({ topic: branch.label, level: plan.key });
         } catch {
           setNodes((prev) =>
             prev.map((n) =>
@@ -586,10 +588,9 @@ export default function Canvas({ user, canvasId, onExit }) {
           return;
         }
 
-        // The third level is created from the branch's suggested sub-topics but
-        // deliberately left blank — no summary is requested for it. These are the
-        // gaps the canvas has found for you to fill in, which is the whole point;
-        // writing them for you would defeat it.
+        // The third level comes from the branch's own response, which returns a
+        // one-line detail alongside each sub-topic label. That is what lets the
+        // leaves arrive with something in them without costing a request each.
         const leaves = result.subtopics.slice(0, plan.leaves);
         const leafIds = leaves.map(() => crypto.randomUUID());
 
@@ -601,19 +602,21 @@ export default function Canvas({ user, canvasId, onExit }) {
                   data: {
                     ...n.data,
                     loading: false,
-                    notes: result.summary,
-                    aiFilled: Boolean(result.summary),
+                    // Keep the detail line if the fuller summary came back empty.
+                    notes: result.summary || n.data.notes,
+                    aiFilled: Boolean(result.summary || n.data.notes),
                   },
                 }
               : n
           ),
-          ...leaves.map((leafLabel, j) =>
+          ...leaves.map((leaf, j) =>
             makeNode({
               id: leafIds[j],
               x: rootX + i * CHILD_SPACING + j * 40,
               y: 90 + LEVEL_HEIGHT * 2,
-              label: leafLabel,
+              label: leaf.label,
               parentId: branchId,
+              extra: { notes: leaf.detail, aiFilled: Boolean(leaf.detail) },
             })
           ),
         ]);
@@ -630,21 +633,21 @@ export default function Canvas({ user, canvasId, onExit }) {
 
   // Attach suggested subtopics as dashed "AI suggested" children of `parentId`,
   // skipping labels already on that branch.
-  function appendSuggestions(parentId, labels) {
-    if (labels.length === 0) return;
+  function appendSuggestions(parentId, subtopics) {
+    if (subtopics.length === 0) return;
     const parent = liveRef.current.nodes.find((n) => n.id === parentId);
     if (!parent) return;
 
     const siblings = liveRef.current.nodes.filter((n) => n.data.parentId === parentId);
     const taken = new Set(siblings.map((s) => s.data.label.toLowerCase()));
-    const fresh = labels.filter((label) => !taken.has(label.toLowerCase()));
+    const fresh = subtopics.filter((s) => !taken.has(s.label.toLowerCase()));
     if (fresh.length === 0) return;
 
     let nextX = siblings.length
       ? Math.max(...siblings.map((s) => s.position.x)) + CHILD_SPACING
       : parent.position.x;
 
-    const created = fresh.map((label) => {
+    const created = fresh.map(({ label, detail }) => {
       const node = {
         id: crypto.randomUUID(),
         type: 'knowledge',
@@ -652,6 +655,8 @@ export default function Canvas({ user, canvasId, onExit }) {
         data: {
           ...NEW_BLOCK_FIELDS,
           label,
+          notes: detail,
+          aiFilled: Boolean(detail),
           parentId,
           isRoot: false,
           aiSuggested: true,
