@@ -429,53 +429,20 @@ export default function Canvas({ user, canvasId, onExit }) {
     return roots.length ? Math.max(...roots.map((r) => r.position.x)) + ROOT_SPACING : 60;
   }
 
+  // Enter in the search bar, and the starter chips, create an empty block and
+  // nothing else. Deliberately no model call: the block is a blank page for the
+  // user's own account of the topic. "Fill my knowledge" is what reviews that
+  // account afterwards and adds the sub-topics they missed. Generating anything
+  // here would be answering a question the user came to answer themselves.
   function addRootBlock(rawLabel) {
     const label = rawLabel.trim();
     if (!label) return;
     pushHistory();
 
-    const newX = nextRootX();
-    const newId = crypto.randomUUID();
-
     setNodes((prev) => [
       ...prev,
-      makeNode({ id: newId, x: newX, y: 90, label, parentId: null, extra: { loading: aiReady } }),
+      makeNode({ id: crypto.randomUUID(), x: nextRootX(), y: 90, label, parentId: null }),
     ]);
-
-    // A brand-new block arriving empty is the whole reason the canvas felt
-    // dead, so populate it in the background when AI is available.
-    if (aiReady) prefillBlock(newId, label);
-  }
-
-  async function prefillBlock(nodeId, label) {
-    let result;
-    try {
-      result = await expandTopic({ topic: label });
-    } catch {
-      setNodes((prev) =>
-        prev.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, loading: false } } : n))
-      );
-      return;
-    }
-
-    setNodes((prev) =>
-      prev.map((n) =>
-        n.id === nodeId
-          ? {
-              ...n,
-              data: {
-                ...n.data,
-                loading: false,
-                // Don't clobber anything the user typed while waiting.
-                notes: n.data.notes.trim() ? n.data.notes : result.summary,
-                aiFilled: n.data.notes.trim() ? n.data.aiFilled : Boolean(result.summary),
-              },
-            }
-          : n
-      )
-    );
-
-    appendSuggestions(nodeId, result.subtopics);
   }
 
   function handleSearchSubmit(e) {
@@ -870,7 +837,7 @@ export default function Canvas({ user, canvasId, onExit }) {
             value={searchValue}
             onChange={(e) => setSearchValue(e.target.value)}
             placeholder="Explore a topic…"
-            title="Enter adds a single block. “Make a graph” builds a whole branch."
+            title="Enter adds one empty block for you to fill in. “Make a graph” generates a whole tree instead."
             className="min-w-0 flex-1 bg-transparent text-[13.5px] text-ink placeholder:text-subink/70 focus:outline-none"
           />
           <div className="relative shrink-0">

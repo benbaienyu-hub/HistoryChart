@@ -233,12 +233,16 @@ function KnowledgeBlock({ data, id }) {
         </div>
       </div>
 
+      {/* `nowheel` is React Flow's opt-out: without it the canvas swallows the
+          wheel event to zoom, so a trackpad two-finger scroll over long notes
+          zoomed the graph instead of scrolling the text, leaving the scrollbar as
+          the only way to read past the third line. */}
       <textarea
         value={notes}
         onChange={(e) => onNotesChange(id, e.target.value)}
         placeholder={loading ? 'Researching…' : 'Add notes…'}
         rows={3}
-        className={`nodrag mt-2 w-full resize-none rounded-lg border px-2 py-1.5 text-[12.5px] leading-snug text-ink/90 placeholder:text-subink/60 focus:outline-none focus:ring-1 focus:ring-accent/30 ${
+        className={`nodrag nowheel mt-2 w-full resize-y rounded-lg border px-2 py-1.5 text-[12.5px] leading-snug text-ink/90 placeholder:text-subink/60 focus:outline-none focus:ring-1 focus:ring-accent/30 ${
           aiFilled
             ? 'border-accent/30 bg-accent-soft'
             : 'border-line bg-sunken focus:border-accent/40'

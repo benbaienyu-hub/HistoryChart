@@ -64,14 +64,24 @@ With a key set:
   definition of the word *geography* — the label alone is ambiguous, and the
   model has no way to know better. The root subject travels with the request and
   governs the sub-topic details too.
-- Pressing **Enter** instead adds just one block, which still fetches its own
-  summary and suggested sub-topics.
-- **Fill my knowledge** reviews each root topic's notes, flags factual errors,
-  fills empty notes, and suggests sub-topics you're missing.
+- Pressing **Enter** instead adds a single **empty** block and nothing else — no
+  model call at all. That is deliberate: the block is a blank page for your own
+  account of the topic. Writing it yourself is the part that makes the app worth
+  using.
+- **Fill my knowledge** is the other half. It reads what you actually wrote,
+  flags factual errors, fills notes you left blank, and adds the sub-topics you
+  missed. So the order is: type a topic, write what you know, then ask what you
+  got wrong and left out.
 
 Without a key, "Make a graph" is disabled (hover it for why), the toolbar
-button reads "(no key)", and Fill inserts placeholder text. Enter still works —
-it just adds an empty block.
+button reads "(no key)", and Fill inserts placeholder text. Enter is unaffected,
+since it never calls out.
+
+Notes longer than the box scroll with a trackpad or wheel while the pointer is
+over them, and the box can be dragged taller by its bottom-right corner. React
+Flow claims wheel events to zoom the canvas, so the notes field opts out with
+its `nowheel` class — otherwise two-finger scrolling over long notes zoomed the
+graph and the scrollbar was the only way to read past the third line.
 
 ### How the key is kept safe
 
