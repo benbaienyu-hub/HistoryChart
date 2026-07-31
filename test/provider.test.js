@@ -2,8 +2,14 @@
 // Server-side code: the OpenAI SDK refuses to construct under jsdom, which it
 // treats as a browser and therefore a credential-exposure risk.
 import { createServer } from 'node:http';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { configProblem, generateKnowledge, readBaseUrl } from '../server/knowledgeRoutes.js';
+import {
+  configProblem,
+  generateKnowledge,
+  readBaseUrl,
+  setEnvFileForTests,
+} from '../server/knowledgeRoutes.js';
 import { inspectKey } from '../scripts/keyDiagnostics.js';
 
 // OPENAI_BASE_URL exists so the app can be pointed at any OpenAI-compatible
@@ -52,6 +58,8 @@ afterAll(() => new Promise((resolve) => server.close(resolve)));
 beforeEach(() => {
   received.length = 0;
   vi.stubEnv('OPENAI_MOCK', '');
+  // Hermetic: ignore any .env on disk, so these assert process.env behaviour.
+  setEnvFileForTests(null);
   vi.stubEnv('OPENAI_MODEL', '');
   vi.stubEnv('OPENAI_API_KEY', 'stub-key-not-a-real-one');
   vi.stubEnv('OPENAI_BASE_URL', '');
@@ -160,6 +168,8 @@ describe('a custom provider with no model set', () => {
     expect(message).toContain('OPENAI_MODEL');
     expect(message).toContain(baseUrl);
     expect(message).toContain('check-key');
+    // No longer demands a restart, since the file is re-read per request.
+    expect(message).not.toMatch(/restart/i);
   });
 
   it('stops complaining once a model is set', async () => {
@@ -178,5 +188,43 @@ describe('a custom provider with no model set', () => {
     vi.stubEnv('OPENAI_MOCK', '1');
     await expect(generateKnowledge({ topic: 'Ethiopia' })).resolves.toBeTruthy();
     expect(received).toHaveLength(0);
+  });
+});
+
+describe('reading settings from .env without a restart', () => {
+  // Vite copies .env into process.env once, at startup. Editing the file while
+  // the dev server ran therefore changed nothing, and the error said
+  // "OPENAI_MODEL is not set" while the file plainly set it.
+  const fixture = new URL('./fixtures/env-fallback', import.meta.url);
+
+  beforeAll(() => {
+    mkdirSync(new URL('./fixtures/', import.meta.url), { recursive: true });
+    writeFileSync(
+      fixture,
+      'OPENAI_BASE_URL=https://api.groq.com/openai/v1\nOPENAI_MODEL=llama-3.3-70b-versatile\nOPENAI_API_KEY=gsk_from_the_file\n'
+    );
+  });
+
+  beforeEach(() => {
+    setEnvFileForTests(fixture);
+    vi.stubEnv('OPENAI_BASE_URL', '');
+    vi.stubEnv('OPENAI_MODEL', '');
+    vi.stubEnv('OPENAI_API_KEY', '');
+  });
+
+  it('picks up values the process never had', () => {
+    expect(readBaseUrl()).toBe('https://api.groq.com/openai/v1');
+    expect(configProblem()).toBeNull();
+  });
+
+  it('a real environment variable still wins, which is Vite’s precedence', () => {
+    vi.stubEnv('OPENAI_BASE_URL', 'http://localhost:11434/v1');
+    expect(readBaseUrl()).toBe('http://localhost:11434/v1');
+  });
+
+  it('a missing file is not an error', () => {
+    setEnvFileForTests(new URL('./fixtures/does-not-exist', import.meta.url));
+    expect(readBaseUrl()).toBeNull();
+    expect(configProblem()).toBeNull();
   });
 });

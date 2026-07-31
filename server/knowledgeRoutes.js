@@ -90,7 +90,7 @@ export function isKnownLevel(level) {
 // key, a network, or a bill. Every summary it produces is prefixed so it can
 // never be mistaken for real output.
 export function mockEnabled() {
-  const value = process.env.OPENAI_MOCK?.trim().toLowerCase();
+  const value = envValue('OPENAI_MOCK')?.toLowerCase();
   return value === '1' || value === 'true';
 }
 
@@ -151,12 +151,40 @@ For "subtopics", suggest specific things worth a block of their own, not vague c
 
 Never pad the list to reach a count. Some topics support many sub-topics and some support two; returning the honest number is always better than filling space.`;
 
+// Settings resolve from the real environment first, then from .env directly.
+//
+// Vite copies .env into process.env once, at startup (see vite.config.js), so
+// editing .env while the dev server runs used to change nothing until a restart
+// — and the resulting error said "OPENAI_MODEL is not set" while the file plainly
+// set it. Reading the file as a fallback removes that trap. Precedence is
+// unchanged: a real environment variable still wins, which is Vite's rule.
+let envFilePath = new URL('../.env', import.meta.url);
+
+// Test seam. The fallback reads a real file, which would otherwise make the test
+// suite depend on whatever .env happens to be sitting on disk. Pass null to turn
+// the fallback off entirely.
+export function setEnvFileForTests(path) {
+  envFilePath = path;
+}
+
+function envValue(name) {
+  const fromProcess = process.env[name]?.trim();
+  if (fromProcess) return fromProcess;
+  if (!envFilePath) return null;
+  try {
+    return parseEnv(readFileSync(envFilePath, 'utf8'))[name]?.trim() || null;
+  } catch {
+    // No .env, or unreadable. In production there may legitimately not be one.
+    return null;
+  }
+}
+
 function readKey() {
-  return process.env.OPENAI_API_KEY?.trim() || null;
+  return envValue('OPENAI_API_KEY');
 }
 
 function readModel() {
-  return process.env.OPENAI_MODEL?.trim() || DEFAULT_MODEL;
+  return envValue('OPENAI_MODEL') ?? DEFAULT_MODEL;
 }
 
 // Point the app at any OpenAI-compatible provider. Several have free tiers, and
@@ -167,7 +195,7 @@ function readModel() {
 // them so the client never has to parse prose. Support varies, so if a provider
 // rejects the schema the route surfaces its error rather than guessing.
 export function readBaseUrl() {
-  return process.env.OPENAI_BASE_URL?.trim().replace(/\/+$/, '') || null;
+  return envValue('OPENAI_BASE_URL')?.replace(/\/+$/, '') || null;
 }
 
 // A model name is provider-specific. Defaulting to gpt-4o is right for OpenAI and
@@ -175,12 +203,12 @@ export function readBaseUrl() {
 // model we refuse to guess — otherwise the first request fails with "gpt-4o isn't
 // available", which reads like a key problem and isn't.
 export function configProblem() {
-  if (readBaseUrl() && !process.env.OPENAI_MODEL?.trim()) {
+  if (readBaseUrl() && !envValue('OPENAI_MODEL')) {
     return (
       `OPENAI_BASE_URL is set to ${readBaseUrl()} but OPENAI_MODEL is not set. ` +
       'A model name is specific to its provider, so there is no sensible default here. ' +
       'Run `npm run check-key` — it lists the models that provider offers — then put one ' +
-      'in OPENAI_MODEL in .env and restart the dev server.'
+      'in OPENAI_MODEL in .env. No restart needed; the file is re-read per request.'
     );
   }
   return null;
@@ -418,7 +446,7 @@ export async function handleKnowledgeRequest(req, res) {
       send(res, 502, {
         error:
           `${where} has no model called "${readModel()}". Run \`npm run check-key\` to list the ` +
-          'models it does offer, put one in OPENAI_MODEL in .env, and restart the dev server.',
+          'models it does offer, and put one in OPENAI_MODEL in .env.',
       });
       return;
     }

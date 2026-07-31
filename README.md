@@ -144,6 +144,12 @@ to its provider, so there is no sensible default — the app says so at startup 
 refuses the request rather than falling back to `gpt-4o` and reporting that your
 key can't reach it, which sounds like a credentials problem and isn't.
 
+**Editing these three settings needs no restart.** Vite copies `.env` into the
+environment once at startup, so the route reads the file directly as a fallback:
+change `OPENAI_MODEL`, `OPENAI_BASE_URL` or `OPENAI_API_KEY` and the next request
+uses the new value. A real environment variable still wins, which is Vite's
+precedence.
+
 `npm run check-key` follows the same setting, so it tests the provider the app
 would actually call, lists the models that provider offers, and stops complaining
 that a `gsk_…` key isn't shaped like an OpenAI one.

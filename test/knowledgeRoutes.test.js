@@ -12,6 +12,7 @@ import {
   mockEnabled,
   normalizeContext,
   normalizeMaxSubtopics,
+  setEnvFileForTests,
 } from '../server/knowledgeRoutes.js';
 import { GRAPH_LEVELS } from '../src/lib/graphLevels.js';
 
@@ -53,6 +54,8 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_API_KEY', '');
   vi.stubEnv('OPENAI_MODEL', '');
   vi.stubEnv('OPENAI_MOCK', '');
+  // Hermetic: ignore any .env on disk, so these assert process.env behaviour.
+  setEnvFileForTests(null);
 });
 
 describe('hasApiKey', () => {
