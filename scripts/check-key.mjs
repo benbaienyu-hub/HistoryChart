@@ -110,12 +110,21 @@ if (res.status === 200) {
     console.log('    only at startup.');
   } else {
     console.log(`  ✗ "${model}" is NOT available to this key.`);
-    const suggestions = ids.filter((id) => id.startsWith('gpt-')).slice(0, 6);
+    // Provider-agnostic: a Groq or Ollama model is not called "gpt-anything", so
+    // filtering by that prefix would leave someone on a free tier with no
+    // suggestions at exactly the moment they need them.
+    const preferred = ids.filter((id) => /gpt|llama|mistral|mixtral|qwen|gemma|claude/i.test(id));
+    const suggestions = (preferred.length ? preferred : ids).slice(0, 8);
     if (suggestions.length) {
-      console.log(`    Models you do have: ${suggestions.join(', ')}`);
+      console.log('');
+      console.log('    Models this key can use:');
+      for (const id of suggestions) console.log(`      ${id}`);
+      if (ids.length > suggestions.length) {
+        console.log(`      …and ${ids.length - suggestions.length} more`);
+      }
     }
     console.log('');
-    console.log('    Set OPENAI_MODEL in .env to one of those. It needs to support');
+    console.log('    Put one of those in OPENAI_MODEL in .env. It needs to support');
     console.log('    JSON-schema structured outputs.');
   }
 } else if (res.status === 401) {
