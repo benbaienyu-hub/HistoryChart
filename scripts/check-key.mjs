@@ -78,7 +78,11 @@ if (problems.some((p) => p.fatal)) {
 
 const configured = (process.env.OPENAI_MODEL || fileEnv?.OPENAI_MODEL || '').trim();
 const model = configured || DEFAULT_MODEL;
-console.log(`  model                ${model}${configured ? '' : '  (default)'}`);
+if (!configured && !isOpenAi) {
+  console.log(`  model                (NOT SET — ${DEFAULT_MODEL} is an OpenAI name, not this provider's)`);
+} else {
+  console.log(`  model                ${model}${configured ? '' : '  (default)'}`);
+}
 console.log('');
 console.log(`  Asking ${isOpenAi ? 'OpenAI' : 'the provider'} whether it accepts this key…`);
 

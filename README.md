@@ -139,9 +139,14 @@ OPENAI_API_KEY=ollama
 OPENAI_MODEL=llama3.1:8b
 ```
 
+**`OPENAI_MODEL` is required once `OPENAI_BASE_URL` is set.** A model name belongs
+to its provider, so there is no sensible default — the app says so at startup and
+refuses the request rather than falling back to `gpt-4o` and reporting that your
+key can't reach it, which sounds like a credentials problem and isn't.
+
 `npm run check-key` follows the same setting, so it tests the provider the app
-would actually call, and stops complaining that a `gsk_…` key isn't shaped like
-an OpenAI one.
+would actually call, lists the models that provider offers, and stops complaining
+that a `gsk_…` key isn't shaped like an OpenAI one.
 
 **The one requirement is JSON-schema structured outputs.** The route depends on
 them so the client never has to parse prose, and support varies between

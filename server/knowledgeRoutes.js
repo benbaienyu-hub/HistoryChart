@@ -170,6 +170,22 @@ export function readBaseUrl() {
   return process.env.OPENAI_BASE_URL?.trim().replace(/\/+$/, '') || null;
 }
 
+// A model name is provider-specific. Defaulting to gpt-4o is right for OpenAI and
+// nonsense for anything else, so when a custom provider is configured without a
+// model we refuse to guess — otherwise the first request fails with "gpt-4o isn't
+// available", which reads like a key problem and isn't.
+export function configProblem() {
+  if (readBaseUrl() && !process.env.OPENAI_MODEL?.trim()) {
+    return (
+      `OPENAI_BASE_URL is set to ${readBaseUrl()} but OPENAI_MODEL is not set. ` +
+      'A model name is specific to its provider, so there is no sensible default here. ' +
+      'Run `npm run check-key` — it lists the models that provider offers — then put one ' +
+      'in OPENAI_MODEL in .env and restart the dev server.'
+    );
+  }
+  return null;
+}
+
 export function hasApiKey() {
   return readKey() !== null;
 }
@@ -241,6 +257,13 @@ export function buildPrompt({ topic, notes, childLabels, level, context, maxSubt
 export async function generateKnowledge({ topic, notes, childLabels, level, context, maxSubtopics }) {
   if (mockEnabled())
     return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL, context, maxSubtopics });
+
+  const problem = configProblem();
+  if (problem) {
+    const error = new Error(problem);
+    error.code = 'CONFIG';
+    throw error;
+  }
 
   const apiKey = readKey();
   if (!apiKey) {
@@ -355,6 +378,11 @@ export async function handleKnowledgeRequest(req, res) {
       send(res, 503, { error: 'No API key configured', code: 'NO_API_KEY' });
       return;
     }
+    if (error.code === 'CONFIG') {
+      console.error(`[knowledge] not configured: ${error.message}`);
+      send(res, 502, { error: error.message });
+      return;
+    }
     if (error.code === 'REFUSED') {
       send(res, 200, { summary: '', correction: '', subtopics: [], refused: true });
       return;
@@ -385,9 +413,12 @@ export async function handleKnowledgeRequest(req, res) {
       return;
     }
     if (error.status === 404) {
-      console.error(`[knowledge] 404 — model "${readModel()}" not available to this key.`);
+      const where = readBaseUrl() ?? 'OpenAI';
+      console.error(`[knowledge] 404 — ${where} has no model "${readModel()}".`);
       send(res, 502, {
-        error: `Model "${readModel()}" isn't available to this key. Set OPENAI_MODEL in .env to one you have access to.`,
+        error:
+          `${where} has no model called "${readModel()}". Run \`npm run check-key\` to list the ` +
+          'models it does offer, put one in OPENAI_MODEL in .env, and restart the dev server.',
       });
       return;
     }
@@ -407,6 +438,12 @@ export function knowledgeApiPlugin() {
         console.log(
           '[knowledge] OPENAI_MOCK is on — returning offline sample data, not calling OpenAI.'
         );
+      } else {
+        const problem = configProblem();
+        if (problem) console.warn(`[knowledge] NOT CONFIGURED: ${problem}`);
+        else if (readBaseUrl()) {
+          console.log(`[knowledge] using ${readBaseUrl()} with model "${readModel()}".`);
+        }
       }
       server.middlewares.use('/api/knowledge', handleKnowledgeRequest);
       server.middlewares.use('/api/knowledge-status', (req, res) => {

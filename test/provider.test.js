@@ -3,7 +3,7 @@
 // treats as a browser and therefore a credential-exposure risk.
 import { createServer } from 'node:http';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateKnowledge, readBaseUrl } from '../server/knowledgeRoutes.js';
+import { configProblem, generateKnowledge, readBaseUrl } from '../server/knowledgeRoutes.js';
 import { inspectKey } from '../scripts/keyDiagnostics.js';
 
 // OPENAI_BASE_URL exists so the app can be pointed at any OpenAI-compatible
@@ -71,6 +71,12 @@ describe('readBaseUrl', () => {
 });
 
 describe('a custom provider', () => {
+  // A custom provider requires an explicit model — see the guard tested below —
+  // so every case here sets one.
+  beforeEach(() => {
+    vi.stubEnv('OPENAI_MODEL', 'stub-model');
+  });
+
   it('receives the request instead of OpenAI', async () => {
     vi.stubEnv('OPENAI_BASE_URL', baseUrl);
     const result = await generateKnowledge({ topic: 'Ethiopia', level: 'concise' });
@@ -132,5 +138,45 @@ describe('key shape checks against a custom provider', () => {
   it('still catches genuine damage whichever provider is in use', () => {
     const problems = inspectKey('gsk_abc def', { expectOpenAiKey: false });
     expect(problems.some((p) => p.fatal)).toBe(true);
+  });
+});
+
+describe('a custom provider with no model set', () => {
+  // The failure this prevents: OPENAI_BASE_URL pointed at Ollama, OPENAI_MODEL
+  // unset, so the app fell back to "gpt-4o" and reported that the model was not
+  // available to the key — which sounds like a credentials problem and is not.
+  beforeEach(() => {
+    vi.stubEnv('OPENAI_BASE_URL', baseUrl);
+    vi.stubEnv('OPENAI_MODEL', '');
+  });
+
+  it('refuses before spending a request', async () => {
+    await expect(generateKnowledge({ topic: 'Ethiopia' })).rejects.toMatchObject({ code: 'CONFIG' });
+    expect(received).toHaveLength(0);
+  });
+
+  it('names the problem, the provider, and the command that fixes it', async () => {
+    const message = await generateKnowledge({ topic: 'Ethiopia' }).catch((e) => e.message);
+    expect(message).toContain('OPENAI_MODEL');
+    expect(message).toContain(baseUrl);
+    expect(message).toContain('check-key');
+  });
+
+  it('stops complaining once a model is set', async () => {
+    vi.stubEnv('OPENAI_MODEL', 'llama3.1:8b');
+    await expect(generateKnowledge({ topic: 'Ethiopia' })).resolves.toBeTruthy();
+    expect(received[0].body.model).toBe('llama3.1:8b');
+  });
+
+  it('says nothing when no custom provider is configured', () => {
+    // OpenAI's own default is a sensible one, so this must not fire for it.
+    vi.stubEnv('OPENAI_BASE_URL', '');
+    expect(configProblem()).toBeNull();
+  });
+
+  it('offline mode is unaffected — it needs no model at all', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    await expect(generateKnowledge({ topic: 'Ethiopia' })).resolves.toBeTruthy();
+    expect(received).toHaveLength(0);
   });
 });
