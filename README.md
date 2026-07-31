@@ -154,16 +154,27 @@ precedence.
 would actually call, lists the models that provider offers, and stops complaining
 that a `gsk_…` key isn't shaped like an OpenAI one.
 
-**The one requirement is JSON-schema structured outputs.** The route depends on
-them so the client never has to parse prose, and support varies between
-providers and between models at the same provider. If a provider rejects the
-schema, the route surfaces its error rather than guessing — at which point the
-fix is a different model, or a `json_object` fallback that doesn't exist yet.
+**Structured outputs are negotiated, not required.** Not every model supports
+JSON-schema responses — Groq's `llama-3.3` answers such a request with *"This
+model does not support response format `json_schema`"* — so rather than making you
+hunt for a compatible model, the route steps down a ladder:
 
-I have verified the plumbing against a local stub speaking the OpenAI wire
-format: the request goes to `{OPENAI_BASE_URL}/chat/completions` with the key as
-a bearer token, carrying the model, level and context. I have **not** verified
-any particular third-party provider accepts the schema.
+| | Guarantee |
+| --- | --- |
+| `json_schema` | the reply matches the schema |
+| `json_object` | the reply is JSON, but not necessarily the right shape — validated here |
+| no format | no guarantee; the JSON is extracted from the text, code fences and all |
+
+It only steps down when the provider explicitly rejects the format, and it
+remembers what worked per model — so the cost is one wasted request the first
+time and nothing after. A refusal, a bad key or an unknown model is not a format
+problem and surfaces immediately rather than triggering retries.
+
+Verified against a local stub speaking the OpenAI wire format, including one that
+refuses `json_schema` with Groq's exact error: the request goes to
+`{OPENAI_BASE_URL}/chat/completions` with the key as a bearer token, carrying the
+model, level and context, and the ladder steps down and succeeds. Not verified
+against any particular third-party provider — my sandbox cannot reach them.
 
 ### When the key doesn't work
 

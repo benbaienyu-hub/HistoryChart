@@ -7,6 +7,8 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import {
   configProblem,
   generateKnowledge,
+  isFormatUnsupported,
+  parseKnowledgeJson,
   readBaseUrl,
   setEnvFileForTests,
 } from '../server/knowledgeRoutes.js';
@@ -20,18 +22,40 @@ import { inspectKey } from '../scripts/keyDiagnostics.js';
 let server;
 let baseUrl;
 const received = [];
+// Which response_format types the stub refuses, and what content it returns.
+let rejectFormats = new Set();
+let stubContent = null;
 
 beforeAll(async () => {
   server = createServer((req, res) => {
     let raw = '';
     req.on('data', (c) => (raw += c));
     req.on('end', () => {
-      received.push({
-        url: req.url,
-        auth: req.headers.authorization,
-        body: JSON.parse(raw || '{}'),
-      });
+      const body = JSON.parse(raw || '{}');
+      received.push({ url: req.url, auth: req.headers.authorization, body });
+
       res.setHeader('content-type', 'application/json');
+
+      // Groq's exact shape for an unsupported format.
+      const type = body.response_format?.type ?? 'none';
+      if (rejectFormats.has(type)) {
+        res.statusCode = 400;
+        res.end(
+          JSON.stringify({
+            error: {
+              message: `This model does not support response format \`${type}\`.`,
+              type: 'invalid_request_error',
+            },
+          })
+        );
+        return;
+      }
+
+      if (stubContent !== null) {
+        res.end(JSON.stringify({ choices: [{ message: { content: stubContent } }] }));
+        return;
+      }
+
       res.end(
         JSON.stringify({
           choices: [
@@ -57,6 +81,8 @@ afterAll(() => new Promise((resolve) => server.close(resolve)));
 
 beforeEach(() => {
   received.length = 0;
+  rejectFormats = new Set();
+  stubContent = null;
   vi.stubEnv('OPENAI_MOCK', '');
   // Hermetic: ignore any .env on disk, so these assert process.env behaviour.
   setEnvFileForTests(null);
@@ -227,5 +253,120 @@ describe('reading settings from .env without a restart', () => {
     setEnvFileForTests(new URL('./fixtures/does-not-exist', import.meta.url));
     expect(readBaseUrl()).toBeNull();
     expect(configProblem()).toBeNull();
+  });
+});
+
+describe('a model that does not support json_schema', () => {
+  // Groq's llama-3.3 answers a json_schema request with
+  // "This model does not support response format `json_schema`" and a 400.
+  // Requiring the user to find a compatible model is a bad answer, so the route
+  // steps down to a plainer request instead.
+  beforeEach(() => {
+    vi.stubEnv('OPENAI_BASE_URL', baseUrl);
+    vi.stubEnv('OPENAI_MODEL', `no-schema-${Math.round(performance.now() * 1000)}`);
+  });
+
+  it('falls back to json_object and still returns a usable result', async () => {
+    rejectFormats = new Set(['json_schema']);
+    const result = await generateKnowledge({ topic: 'Ethiopia' });
+
+    expect(received.map((r) => r.body.response_format?.type)).toEqual([
+      'json_schema',
+      'json_object',
+    ]);
+    expect(result.summary).toBe('From the stub provider.');
+  });
+
+  it('spells the required shape out once the schema is gone', async () => {
+    rejectFormats = new Set(['json_schema']);
+    await generateKnowledge({ topic: 'Ethiopia' });
+    const retryPrompt = received[1].body.messages.at(-1).content;
+    expect(retryPrompt).toContain('"subtopics"');
+    expect(retryPrompt).toMatch(/JSON and nothing else/i);
+  });
+
+  it('falls all the way to no response_format when json_object is refused too', async () => {
+    rejectFormats = new Set(['json_schema', 'json_object']);
+    const result = await generateKnowledge({ topic: 'Ethiopia' });
+    expect(received.map((r) => r.body.response_format?.type ?? 'none')).toEqual([
+      'json_schema',
+      'json_object',
+      'none',
+    ]);
+    expect(result.summary).toBe('From the stub provider.');
+  });
+
+  it('remembers, so the wasted request happens once per model', async () => {
+    rejectFormats = new Set(['json_schema']);
+    await generateKnowledge({ topic: 'Ethiopia' });
+    expect(received).toHaveLength(2);
+
+    received.length = 0;
+    await generateKnowledge({ topic: 'Carthage' });
+    expect(received.map((r) => r.body.response_format?.type)).toEqual(['json_object']);
+  });
+
+  it('extracts JSON from a fenced code block, which a plain reply often uses', async () => {
+    rejectFormats = new Set(['json_schema', 'json_object']);
+    stubContent =
+      '```json\n{"summary":"Fenced.","correction":"","subtopics":[{"label":"A","detail":"B"}]}\n```';
+    const result = await generateKnowledge({ topic: 'Ethiopia' });
+    expect(result.summary).toBe('Fenced.');
+    expect(result.subtopics).toEqual([{ label: 'A', detail: 'B' }]);
+  });
+
+  it('does not walk the ladder for a failure that is not about the format', async () => {
+    // The provider accepted json_schema but answered with prose. That is a
+    // content problem, not a format-support problem: retrying a plainer request
+    // would waste two more calls and still fail.
+    rejectFormats = new Set();
+    stubContent = 'I am afraid I cannot do that.';
+    const error = await generateKnowledge({ topic: 'Ethiopia' }).catch((e) => e);
+    expect(error.message).toMatch(/did not return JSON/i);
+    expect(received).toHaveLength(1);
+  });
+});
+
+describe('parseKnowledgeJson', () => {
+  it('reads plain JSON', () => {
+    expect(parseKnowledgeJson('{"summary":"x"}')).toEqual({ summary: 'x' });
+  });
+
+  it('strips a ```json fence', () => {
+    expect(parseKnowledgeJson('```json\n{"summary":"x"}\n```')).toEqual({ summary: 'x' });
+  });
+
+  it('strips a bare ``` fence', () => {
+    expect(parseKnowledgeJson('```\n{"summary":"x"}\n```')).toEqual({ summary: 'x' });
+  });
+
+  it('finds the object inside surrounding prose', () => {
+    expect(parseKnowledgeJson('Sure! {"summary":"x"} Hope that helps.')).toEqual({ summary: 'x' });
+  });
+
+  it('throws a readable error when there is no JSON at all', () => {
+    expect(() => parseKnowledgeJson('I cannot do that.')).toThrow(/did not return JSON/i);
+    expect(() => parseKnowledgeJson('')).toThrow(/did not return JSON/i);
+    expect(() => parseKnowledgeJson(null)).toThrow(/did not return JSON/i);
+  });
+});
+
+describe('isFormatUnsupported', () => {
+  it('recognises the provider saying the format is not supported', () => {
+    expect(
+      isFormatUnsupported({
+        status: 400,
+        message: 'This model does not support response format `json_schema`.',
+      })
+    ).toBe(true);
+  });
+
+  it('ignores other 400s, which must not trigger a retry', () => {
+    expect(isFormatUnsupported({ status: 400, message: 'A "topic" is required' })).toBe(false);
+  });
+
+  it('ignores non-400 failures entirely', () => {
+    expect(isFormatUnsupported({ status: 401, message: 'response_format' })).toBe(false);
+    expect(isFormatUnsupported(undefined)).toBe(false);
   });
 });

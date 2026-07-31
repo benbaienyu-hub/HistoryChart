@@ -282,6 +282,76 @@ export function buildPrompt({ topic, notes, childLabels, level, context, maxSubt
   ].join('\n\n');
 }
 
+
+// Not every model supports JSON-schema responses. Groq's llama-3.3 replies
+// "This model does not support response format `json_schema`" with a 400, and
+// other providers differ again — so rather than requiring the user to hunt for a
+// compatible model, the route walks down a ladder of increasingly plain requests:
+//
+//   json_schema  the response is guaranteed to match the schema
+//   json_object  guaranteed to be JSON, but not to match — we validate ourselves
+//   none         no guarantee at all; we extract the JSON from the text
+//
+// Whatever works is remembered per model, so the cost is one wasted request the
+// first time and nothing after that.
+const FORMAT_TIERS = ['json_schema', 'json_object', 'none'];
+const workingTierByModel = new Map();
+
+function responseFormatFor(tier) {
+  if (tier === 'json_schema') {
+    return {
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'knowledge', strict: true, schema: KNOWLEDGE_SCHEMA },
+      },
+    };
+  }
+  if (tier === 'json_object') return { response_format: { type: 'json_object' } };
+  return {};
+}
+
+// Only the schema guarantees the shape, so the plainer tiers have to state it.
+const SHAPE_INSTRUCTION = `Reply with JSON and nothing else — no prose, no code fences — in exactly this shape:
+{"summary": "…", "correction": "…", "subtopics": [{"label": "…", "detail": "…"}]}
+Every field is required. Use an empty string for "summary" or "correction" when they do not apply, and an empty array for "subtopics".`;
+
+// A provider refusing the format is a reason to try a plainer one. Anything else
+// — a bad key, an unknown model, a rate limit — is not, and must surface.
+export function isFormatUnsupported(error) {
+  if (error?.status !== 400) return false;
+  return /response.?format|json.?schema|json.?object|structured.output/i.test(
+    String(error?.message ?? '')
+  );
+}
+
+// The plainest tier may wrap its JSON in prose or a code fence.
+export function parseKnowledgeJson(text) {
+  const raw = String(text ?? '').trim();
+  const unfenced = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const start = unfenced.indexOf('{');
+  const end = unfenced.lastIndexOf('}');
+  if (start === -1 || end <= start) {
+    throw new Error('The model did not return JSON.');
+  }
+  return JSON.parse(unfenced.slice(start, end + 1));
+}
+
+function shapeResult(parsed, maxSubtopics) {
+  return {
+    summary: String(parsed?.summary ?? '').trim(),
+    correction: String(parsed?.correction ?? '').trim(),
+    // A sub-topic with no label is unusable; one with no detail is merely thin,
+    // so it survives.
+    subtopics: (Array.isArray(parsed?.subtopics) ? parsed.subtopics : [])
+      .map((s) => ({
+        label: String(s?.label ?? '').trim(),
+        detail: String(s?.detail ?? '').trim(),
+      }))
+      .filter((s) => s.label)
+      .slice(0, normalizeMaxSubtopics(maxSubtopics)),
+  };
+}
+
 export async function generateKnowledge({ topic, notes, childLabels, level, context, maxSubtopics }) {
   if (mockEnabled())
     return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL, context, maxSubtopics });
@@ -302,48 +372,56 @@ export async function generateKnowledge({ topic, notes, childLabels, level, cont
 
   const baseURL = readBaseUrl();
   const client = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
+  const model = readModel();
 
-  const completion = await client.chat.completions.create({
-    model: readModel(),
-    messages: [
-      { role: 'system', content: SYSTEM },
-      {
-        role: 'user',
-        content: buildPrompt({ topic, notes, childLabels, level, context, maxSubtopics }),
-      },
-    ],
-    response_format: {
-      type: 'json_schema',
-      json_schema: { name: 'knowledge', strict: true, schema: KNOWLEDGE_SCHEMA },
-    },
-  });
+  const prompt = buildPrompt({ topic, notes, childLabels, level, context, maxSubtopics });
+  const remembered = workingTierByModel.get(model);
+  const tiers = remembered ? [remembered] : FORMAT_TIERS;
 
-  const message = completion.choices?.[0]?.message;
+  let lastError;
+  for (const tier of tiers) {
+    try {
+      const completion = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: SYSTEM },
+          {
+            role: 'user',
+            content: tier === 'json_schema' ? prompt : `${prompt}\n\n${SHAPE_INSTRUCTION}`,
+          },
+        ],
+        ...responseFormatFor(tier),
+      });
 
-  // With structured outputs the model can decline instead of answering; that
-  // arrives as a `refusal` string rather than an error.
-  if (message?.refusal) {
-    const error = new Error(message.refusal);
-    error.code = 'REFUSED';
-    throw error;
+      const message = completion.choices?.[0]?.message;
+
+      // With structured outputs the model can decline instead of answering; that
+      // arrives as a `refusal` string rather than an error.
+      if (message?.refusal) {
+        const error = new Error(message.refusal);
+        error.code = 'REFUSED';
+        throw error;
+      }
+
+      const result = shapeResult(parseKnowledgeJson(message?.content), maxSubtopics);
+
+      if (remembered !== tier) {
+        workingTierByModel.set(model, tier);
+        if (tier !== 'json_schema') {
+          console.log(
+            `[knowledge] "${model}" does not support json_schema; using ${tier} for it instead.`
+          );
+        }
+      }
+      return result;
+    } catch (error) {
+      lastError = error;
+      // A refusal is the model's answer, not a format problem: do not retry it.
+      if (error.code === 'REFUSED' || !isFormatUnsupported(error)) throw error;
+    }
   }
 
-  const parsed = JSON.parse(message?.content ?? '{}');
-
-  return {
-    summary: (parsed.summary ?? '').trim(),
-    correction: (parsed.correction ?? '').trim(),
-    // Eight is the ceiling the schema asks for; the client takes as many as the
-    // chosen level calls for. A sub-topic with no label is unusable; one with no
-    // detail is merely thin, so it survives.
-    subtopics: (parsed.subtopics ?? [])
-      .map((s) => ({
-        label: String(s?.label ?? '').trim(),
-        detail: String(s?.detail ?? '').trim(),
-      }))
-      .filter((s) => s.label)
-      .slice(0, normalizeMaxSubtopics(maxSubtopics)),
-  };
+  throw lastError;
 }
 
 function readBody(req) {
