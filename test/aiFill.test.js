@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { normalizeSubtopics } from '../src/lib/aiFill';
+import { describe, expect, it, vi } from 'vitest';
+import { expandTopic, normalizeSubtopics } from '../src/lib/aiFill';
 
 // Sub-topics gained a per-item `detail` when the third level of a generated
 // graph started arriving with content. This guards the boundary: whatever the
@@ -51,5 +51,35 @@ describe('normalizeSubtopics', () => {
     expect(normalizeSubtopics(undefined)).toEqual([]);
     expect(normalizeSubtopics(null)).toEqual([]);
     expect(normalizeSubtopics([])).toEqual([]);
+  });
+});
+
+describe('when the dev server is unreachable', () => {
+  // fetch rejects only when the request never reached a server. The browser calls
+  // that "Failed to fetch", which surfaced verbatim and read like an AI failure.
+  it('says what is actually wrong, and how to check', async () => {
+    const stub = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    const error = await expandTopic({ topic: 'Ethiopia' }).catch((e) => e);
+
+    expect(error.message).toMatch(/npm run dev/);
+    expect(error.message).not.toMatch(/^Failed to fetch$/);
+    expect(stub).toHaveBeenCalled();
+  });
+
+  it('keeps the original failure as the cause, for the console', async () => {
+    const original = new TypeError('Failed to fetch');
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(original);
+    const error = await expandTopic({ topic: 'Ethiopia' }).catch((e) => e);
+    expect(error.cause).toBe(original);
+  });
+
+  it('a server that answers with an error is reported as that error, not as unreachable', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      status: 502,
+      json: async () => ({ error: 'Groq has no model called "nope".' }),
+    });
+    const error = await expandTopic({ topic: 'Ethiopia' }).catch((e) => e);
+    expect(error.message).toBe('Groq has no model called "nope".');
   });
 });

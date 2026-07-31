@@ -27,11 +27,23 @@ const PLACEHOLDER = {
 };
 
 async function requestKnowledge({ topic, notes, childLabels, level, context, maxSubtopics }) {
-  const response = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ topic, notes, childLabels, level, context, maxSubtopics }),
-  });
+  let response;
+  try {
+    response = await fetch(ENDPOINT, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ topic, notes, childLabels, level, context, maxSubtopics }),
+    });
+  } catch (cause) {
+    // fetch only rejects when the request never reached a server, and the
+    // browser's own wording for that is "Failed to fetch" — which sounds like an
+    // AI or key problem and is not one. Name the actual cause instead.
+    throw new Error(
+      'Could not reach the local server. Is `npm run dev` still running? Check that ' +
+        'terminal for a crash, and that the page is open on the port it printed.',
+      { cause }
+    );
+  }
 
   if (response.status === 503) {
     return { ...PLACEHOLDER, placeholder: true };
