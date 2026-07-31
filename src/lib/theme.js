@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 
 // Theme is stored as an explicit 'light' | 'dark' choice, or absent to mean
 // "follow the system". The pre-paint script in index.html reads the same key.
-const KEY = 'historychart:theme:v1';
+const KEY = 'lacuna:theme:v1';
 
 const listeners = new Set();
 

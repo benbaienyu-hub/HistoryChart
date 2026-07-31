@@ -200,7 +200,7 @@ export async function handleKnowledgeRequest(req, res) {
 // process. In production, mount handleKnowledgeRequest in your own server.
 export function knowledgeApiPlugin() {
   return {
-    name: 'historychart-knowledge-api',
+    name: 'lacuna-knowledge-api',
     configureServer(server) {
       server.middlewares.use('/api/knowledge', handleKnowledgeRequest);
       server.middlewares.use('/api/knowledge-status', (req, res) => {

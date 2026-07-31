@@ -6,8 +6,8 @@ import { readJSON, writeJSON } from './storage';
 // any check would be cosmetic and storing it would be a liability. Swap this
 // module for a real auth provider (session cookie / OAuth / magic link) when
 // a backend exists.
-const USERS_KEY = 'historychart:users:v1';
-const SESSION_KEY = 'historychart:session:v1';
+const USERS_KEY = 'lacuna:users:v1';
+const SESSION_KEY = 'lacuna:session:v1';
 
 export function normalizeEmail(email) {
   return email.trim().toLowerCase();

@@ -12,7 +12,7 @@ export async function sendShareInvite({ canvasTitle, recipientEmail, fromEmail }
     preview: {
       to: recipientEmail,
       from: fromEmail,
-      subject: `${fromEmail} shared "${canvasTitle}" with you on HistoryChart`,
+      subject: `${fromEmail} shared "${canvasTitle}" with you on Lacuna`,
     },
   };
 }

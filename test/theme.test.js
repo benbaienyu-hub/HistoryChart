@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolvedTheme, setTheme, storedChoice, systemTheme, toggleTheme } from '../src/lib/theme';
 
-const KEY = 'historychart:theme:v1';
+const KEY = 'lacuna:theme:v1';
 
 // The store reads `matchMedia` on every call, so a settable flag is enough to
 // simulate an OS that prefers dark.

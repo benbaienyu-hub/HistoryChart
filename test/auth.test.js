@@ -78,13 +78,13 @@ describe('signOut / getCurrentUser', () => {
 
   it('returns null when the session points at a profile that no longer exists', () => {
     signIn({ email: 'alice@example.com' });
-    localStorage.removeItem('historychart:users:v1');
+    localStorage.removeItem('lacuna:users:v1');
     expect(getCurrentUser()).toBeNull();
   });
 
   it('survives corrupt stored JSON', () => {
-    localStorage.setItem('historychart:session:v1', '{not json');
-    localStorage.setItem('historychart:users:v1', 'also not json');
+    localStorage.setItem('lacuna:session:v1', '{not json');
+    localStorage.setItem('lacuna:users:v1', 'also not json');
     expect(getCurrentUser()).toBeNull();
     expect(listUsers()).toEqual([]);
   });

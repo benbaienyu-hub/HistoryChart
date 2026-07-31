@@ -1,8 +1,8 @@
 import { readJSON, writeJSON } from './storage';
 import { normalizeEmail } from './auth';
 
-const CANVASES_KEY = 'historychart:canvases:v1';
-const LAST_OPEN_KEY = 'historychart:lastOpen:v1';
+const CANVASES_KEY = 'lacuna:canvases:v1';
+const LAST_OPEN_KEY = 'lacuna:lastOpen:v1';
 
 function all() {
   return readJSON(CANVASES_KEY, []);

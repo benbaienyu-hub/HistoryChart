@@ -31,7 +31,7 @@ export default function SignIn({ onSignedIn }) {
         className="w-full max-w-[380px] rounded-3xl border border-line bg-surface p-8 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_24px_48px_-16px_rgba(0,0,0,0.18)] backdrop-blur-xl"
       >
         <h1 className="text-center text-[26px] font-semibold tracking-tight text-ink">
-          HistoryChart
+          Lacuna
         </h1>
         <p className="mt-1.5 text-center text-[13.5px] leading-snug text-subink">
           Map what you know, then let AI fill the gaps.

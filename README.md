@@ -1,9 +1,17 @@
-# HistoryChart
+# Lacuna
 
 A knowledge canvas. Search a topic to drop a block on an infinite canvas, write
 notes on it, branch into sub-topics, connect blocks with labelled relationships —
-then let Claude fill the gaps, correct what you got wrong, and quiz you on the
+then let the AI fill the gaps, correct what you got wrong, and quiz you on the
 rest.
+
+A *lacuna* is a gap — specifically a missing passage in a manuscript. Finding the
+ones in your own notes is the point of the app.
+
+> Renamed from **HistoryChart**, which promised both less (it was never
+> history-only) and more (it is a canvas, not a chart). Storage keys moved from
+> the `historychart:` prefix to `lacuna:`; `src/lib/migrate.js` moves existing
+> data across on first load, so an upgrade keeps your canvases.
 
 ## Running it
 
@@ -112,6 +120,7 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
 | `src/lib/canvasStore.js` | Canvas persistence (localStorage) |
+| `src/lib/migrate.js` | One-time move of pre-rename storage keys |
 | `src/lib/templates.js` | Pre-built starter canvases |
 | `test/` | Vitest suite over everything in `src/lib` and the API route |
 

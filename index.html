@@ -4,13 +4,19 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HistoryChart</title>
+    <title>Lacuna</title>
     <script>
       // Set the theme before first paint, otherwise a dark-mode user sees a
       // white flash while the bundle loads. Kept inline and dependency-free
       // for that reason.
+      //
+      // Falls back to the pre-rename key: this runs before the bundle, so it
+      // executes before the storage migration and would otherwise flash white
+      // once for every returning user.
       try {
-        var stored = localStorage.getItem('historychart:theme:v1');
+        var stored =
+          localStorage.getItem('lacuna:theme:v1') ||
+          localStorage.getItem('historychart:theme:v1');
         if (stored === 'dark' || stored === 'light') {
           document.documentElement.dataset.theme = stored;
         }
