@@ -113,7 +113,7 @@ Note that a real environment variable takes precedence over `.env`; if
 ### Running without a key, on purpose
 
 ```bash
-OPENAI_MOCK=1 npm run dev
+npm run demo          # or: OPENAI_MOCK=1 npm run dev
 ```
 
 Offline mode: every AI feature answers with deterministic sample content and
@@ -285,6 +285,7 @@ npm run preview  # serve the build — no AI route, see Deploying
 npm run lint     # oxlint
 npm test         # vitest, single run
 npm run check-key   # diagnose an OPENAI_API_KEY that isn't working
+npm run demo        # dev server in offline mode — no key, no network, no bill
 npm run test:watch
 ```
 

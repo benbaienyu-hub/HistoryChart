@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "check-key": "node scripts/check-key.mjs"
+    "check-key": "node scripts/check-key.mjs",
+    "demo": "OPENAI_MOCK=1 vite"
   },
   "dependencies": {
     "framer-motion": "^12.43.0",
