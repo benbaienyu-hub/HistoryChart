@@ -1,3 +1,6 @@
+// @vitest-environment node
+// Server-side code: the OpenAI SDK refuses to construct under jsdom, which it
+// treats as a browser and therefore a credential-exposure risk.
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {

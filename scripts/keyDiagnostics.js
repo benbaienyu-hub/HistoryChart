@@ -39,7 +39,7 @@ export function fingerprint(key) {
 
 // Problems worth reporting before spending a request on the API. `fatal` means
 // the key certainly will not work, so there is no point calling out.
-export function inspectKey(key) {
+export function inspectKey(key, { expectOpenAiKey = true } = {}) {
   const problems = [];
 
   if (!key) {
@@ -75,17 +75,22 @@ export function inspectKey(key) {
         'The value contains a non-ASCII character (a curly quote or non-breaking space, most likely). Retype or re-copy it as plain text.',
     });
   }
-  if (!key.startsWith('sk-')) {
-    problems.push({
-      fatal: false,
-      message: 'The value does not start with "sk-", which OpenAI keys normally do.',
-    });
-  }
-  if (key.length < 40) {
-    problems.push({
-      fatal: false,
-      message: `The value is only ${key.length} characters, which is shorter than any current OpenAI key — it looks truncated.`,
-    });
+  // Only judge the key's shape when the request is going to OpenAI. Other
+  // providers use their own formats (Groq's start "gsk_", Mistral's are short),
+  // and a local Ollama accepts any placeholder at all.
+  if (expectOpenAiKey) {
+    if (!key.startsWith('sk-')) {
+      problems.push({
+        fatal: false,
+        message: 'The value does not start with "sk-", which OpenAI keys normally do.',
+      });
+    }
+    if (key.length < 40) {
+      problems.push({
+        fatal: false,
+        message: `The value is only ${key.length} characters, which is shorter than any current OpenAI key — it looks truncated.`,
+      });
+    }
   }
 
   return problems;

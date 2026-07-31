@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // `npm run check-key` — answers one question definitively: is the key the dev
-// server would use actually accepted by OpenAI?
+// server would use actually accepted by the provider it would use?
 //
-// It talks to OpenAI directly, so it separates "the key is bad" from "the app
-// is misconfigured", which a 401 in the app cannot distinguish. It never prints
-// the key itself.
+// It talks to that provider directly, so it separates "the key is bad" from "the
+// app is misconfigured", which a 401 in the app cannot distinguish. It honours
+// OPENAI_BASE_URL, so it tests whatever the app would really call. It never
+// prints the key itself.
 
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,7 @@ import { fingerprint, inspectKey, parseEnv, resolveKey } from './keyDiagnostics.
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_MODEL = 'gpt-4o';
+const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
 
 function readEnvFile() {
   try {
@@ -39,6 +41,13 @@ const { key, source, shadowedFile } = resolveKey({
   fileValue: fileEnv?.OPENAI_API_KEY,
 });
 
+// Whichever provider the dev server would use, this must test the same one.
+const baseUrl =
+  (process.env.OPENAI_BASE_URL || fileEnv?.OPENAI_BASE_URL || '').trim().replace(/\/+$/, '') ||
+  DEFAULT_BASE_URL;
+const isOpenAi = baseUrl === DEFAULT_BASE_URL;
+
+console.log(`  provider             ${baseUrl}${isOpenAi ? '  (default)' : ''}`);
 console.log(`  key comes from       ${source}`);
 console.log(`  key                  ${fingerprint(key)}`);
 
@@ -52,7 +61,8 @@ if (shadowedFile) {
   console.log('    and check ~/.zshrc or ~/.bashrc for an export that puts it back.');
 }
 
-const problems = inspectKey(key);
+// A non-OpenAI provider has its own key format, so don't report shape faults.
+const problems = inspectKey(key, { expectOpenAiKey: isOpenAi });
 if (problems.length) {
   console.log('');
   for (const p of problems) console.log(`  ${p.fatal ? '✗' : '!'} ${p.message}`);
@@ -60,7 +70,7 @@ if (problems.length) {
 
 if (problems.some((p) => p.fatal)) {
   console.log('');
-  console.log('  Not contacting OpenAI: the value above cannot work as written.');
+  console.log('  Not contacting the provider: the value above cannot work as written.');
   console.log('  Fix it in .env, then run this again.');
   console.log('');
   process.exit(1);
@@ -70,16 +80,16 @@ const configured = (process.env.OPENAI_MODEL || fileEnv?.OPENAI_MODEL || '').tri
 const model = configured || DEFAULT_MODEL;
 console.log(`  model                ${model}${configured ? '' : '  (default)'}`);
 console.log('');
-console.log('  Asking OpenAI whether it accepts this key…');
+console.log(`  Asking ${isOpenAi ? 'OpenAI' : 'the provider'} whether it accepts this key…`);
 
 let res;
 try {
-  res = await fetch('https://api.openai.com/v1/models', {
+  res = await fetch(`${baseUrl}/models`, {
     headers: { Authorization: `Bearer ${key}` },
   });
 } catch (error) {
   console.log('');
-  console.log(`  ✗ Could not reach api.openai.com: ${error.message}`);
+  console.log(`  ✗ Could not reach ${baseUrl}: ${error.message}`);
   console.log('    A proxy, VPN or firewall is the usual cause. This is not a key problem.');
   console.log('');
   process.exit(1);
@@ -109,13 +119,15 @@ if (res.status === 200) {
     console.log('    JSON-schema structured outputs.');
   }
 } else if (res.status === 401) {
-  console.log('  ✗ OpenAI rejected the key (401).');
+  console.log(`  ✗ ${isOpenAi ? 'OpenAI' : 'The provider'} rejected the key (401).`);
   const message = body?.error?.message;
-  if (message) console.log(`    OpenAI says: ${message}`);
+  if (message) console.log(`    It says: ${message}`);
   console.log('');
   console.log('    The key itself is the problem, not the app. Either it was revoked, it belongs');
-  console.log('    to a deleted project, or the copy is damaged. Create a new one at');
-  console.log('    https://platform.openai.com/api-keys and paste it into .env.');
+  console.log('    to a deleted project, or the copy is damaged.');
+  if (isOpenAi) {
+    console.log('    Create a new one at https://platform.openai.com/api-keys.');
+  }
 } else if (res.status === 403) {
   // OpenAI returns 403 for an unsupported region, but an intercepting corporate
   // proxy returns one too — and that has nothing to do with the key.
@@ -129,13 +141,17 @@ if (res.status === 200) {
     console.log('    proxy or VPN is the usual cause. This is not a key problem.');
   }
 } else if (res.status === 429) {
-  console.log('  ! The key is recognised but rate-limited or out of quota (429).');
+  console.log('  ! The key is recognised but rate-limited or out of credit (429).');
   const message = body?.error?.message;
-  if (message) console.log(`    OpenAI says: ${message}`);
-  console.log('    Check billing at https://platform.openai.com/settings/organization/billing');
+  if (message) console.log(`    It says: ${message}`);
+  if (isOpenAi) {
+    console.log('    Check https://platform.openai.com/settings/organization/billing');
+    console.log('    Out of credit? Either top up, switch OPENAI_MODEL to something cheaper,');
+    console.log('    or point OPENAI_BASE_URL at a provider with a free tier — see the README.');
+  }
 } else {
   console.log(`  ? Unexpected response: ${res.status}`);
-  if (body?.error?.message) console.log(`    OpenAI says: ${body.error.message}`);
+  if (body?.error?.message) console.log(`    It says: ${body.error.message}`);
 }
 console.log('');
 process.exit(res.status === 200 ? 0 : 1);

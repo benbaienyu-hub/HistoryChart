@@ -159,6 +159,17 @@ function readModel() {
   return process.env.OPENAI_MODEL?.trim() || DEFAULT_MODEL;
 }
 
+// Point the app at any OpenAI-compatible provider. Several have free tiers, and
+// a local Ollama needs no key at all, so this is the escape hatch when OpenAI
+// credits run out. Unset means OpenAI itself, exactly as before.
+//
+// The provider must support JSON-schema structured outputs; the route relies on
+// them so the client never has to parse prose. Support varies, so if a provider
+// rejects the schema the route surfaces its error rather than guessing.
+export function readBaseUrl() {
+  return process.env.OPENAI_BASE_URL?.trim().replace(/\/+$/, '') || null;
+}
+
 export function hasApiKey() {
   return readKey() !== null;
 }
@@ -175,14 +186,18 @@ function readEnvFileKey() {
 }
 
 // The faults worth naming in a 401 log. Deliberately does not include the key.
-function describeKeyFaults(key) {
+function describeKeyFaults(key, { expectOpenAiKey = true } = {}) {
   const faults = [];
   if (key.includes('...')) faults.push('still contains the "..." placeholder');
   if (/\s/.test(key)) faults.push('contains whitespace');
   if (/["']/.test(key)) faults.push('contains a quote character');
   if (/[^\x20-\x7E]/.test(key)) faults.push('contains a non-ASCII character');
-  if (!key.startsWith('sk-')) faults.push('does not start with "sk-"');
-  if (key.length < 40) faults.push('shorter than any current OpenAI key');
+  // Other providers use their own key formats, so only judge the shape when the
+  // request is actually going to OpenAI.
+  if (expectOpenAiKey) {
+    if (!key.startsWith('sk-')) faults.push('does not start with "sk-"');
+    if (key.length < 40) faults.push('shorter than any current OpenAI key');
+  }
   return faults.join('; ');
 }
 
@@ -234,7 +249,8 @@ export async function generateKnowledge({ topic, notes, childLabels, level, cont
     throw error;
   }
 
-  const client = new OpenAI({ apiKey });
+  const baseURL = readBaseUrl();
+  const client = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
 
   const completion = await client.chat.completions.create({
     model: readModel(),
@@ -349,6 +365,7 @@ export async function handleKnowledgeRequest(req, res) {
       // A bare "401" is the least actionable message this route can produce, so
       // report what the process is actually holding — never the key itself.
       const key = readKey() ?? '';
+      const baseURL = readBaseUrl();
       const fromShell = Boolean(process.env.OPENAI_API_KEY) && !readEnvFileKey();
       console.error(
         [
@@ -356,7 +373,8 @@ export async function handleKnowledgeRequest(req, res) {
           `  length: ${key.length}`,
           `  starts: ${JSON.stringify(key.slice(0, 8))}`,
           `  source: ${fromShell ? 'shell environment (this overrides .env)' : '.env or shell'}`,
-          `  suspicious: ${describeKeyFaults(key) || 'nothing obvious'}`,
+          `  provider: ${baseURL ?? 'api.openai.com (default)'}`,
+          `  suspicious: ${describeKeyFaults(key, { expectOpenAiKey: !baseURL }) || 'nothing obvious'}`,
           '  Run `npm run check-key` for a definitive answer.',
         ].join('\n')
       );
@@ -395,6 +413,7 @@ export function knowledgeApiPlugin() {
         send(res, 200, {
           configured: hasApiKey() || mockEnabled(),
           model: mockEnabled() ? 'offline sample data' : readModel(),
+          provider: mockEnabled() ? 'offline' : (readBaseUrl() ?? 'openai'),
           mock: mockEnabled(),
         });
       });

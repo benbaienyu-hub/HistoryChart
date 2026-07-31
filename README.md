@@ -122,6 +122,38 @@ laptop with no network and no bill. Every summary it writes is prefixed
 `[offline sample]`, so it can't be mistaken for real output, and the dev server
 says so once at startup.
 
+### Using a different provider (or none)
+
+OpenAI credit is prepaid and runs out. The route talks to whatever
+OpenAI-compatible endpoint you point it at, so you have options:
+
+```bash
+# In .env — a provider with a free tier
+OPENAI_BASE_URL=https://api.groq.com/openai/v1
+OPENAI_API_KEY=gsk_your_key
+OPENAI_MODEL=llama-3.3-70b-versatile
+
+# …or a model running on your own machine, with no key and no account
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_API_KEY=ollama
+OPENAI_MODEL=llama3.1:8b
+```
+
+`npm run check-key` follows the same setting, so it tests the provider the app
+would actually call, and stops complaining that a `gsk_…` key isn't shaped like
+an OpenAI one.
+
+**The one requirement is JSON-schema structured outputs.** The route depends on
+them so the client never has to parse prose, and support varies between
+providers and between models at the same provider. If a provider rejects the
+schema, the route surfaces its error rather than guessing — at which point the
+fix is a different model, or a `json_object` fallback that doesn't exist yet.
+
+I have verified the plumbing against a local stub speaking the OpenAI wire
+format: the request goes to `{OPENAI_BASE_URL}/chat/completions` with the key as
+a bearer token, carrying the model, level and context. I have **not** verified
+any particular third-party provider accepts the schema.
+
 ### When the key doesn't work
 
 ```bash
@@ -206,6 +238,7 @@ hardcode white or black and both themes stay in sync.
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
 | `src/lib/canvasStore.js` | Canvas persistence (localStorage) |
 | `src/lib/migrate.js` | One-time move of pre-rename storage keys |
+| `scripts/check-key.mjs` | Diagnoses a rejected key against whichever provider is configured |
 | `src/lib/templates.js` | Pre-built starter canvases |
 | `test/` | Vitest suite over everything in `src/lib` and the API route |
 
