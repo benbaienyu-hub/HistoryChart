@@ -1,9 +1,9 @@
 // Tidy-tree layout over the parentId forest. Manual relation edges are
 // ignored — they annotate the graph rather than define its structure, so
 // letting them influence placement would fight the user's mental model.
-const NODE_W = 280;
+const NODE_W = 320;
 const H_GAP = 44;
-const LEVEL_H = 230;
+const LEVEL_H = 260;
 const TOP_Y = 90;
 const ROOT_GAP = H_GAP * 2;
 

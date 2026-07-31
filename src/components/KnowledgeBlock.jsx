@@ -40,6 +40,7 @@ function KnowledgeBlock({ data, id }) {
     onSubmitChild,
     onCancelChild,
     onToggleCollapse,
+    onExpand,
     onDelete,
   } = data;
 
@@ -87,7 +88,7 @@ function KnowledgeBlock({ data, id }) {
       initial={{ opacity: 0, scale: 0.55, y: 12 }}
       animate={{ opacity: 1, scale: 1, y: 0 }}
       transition={{ type: 'spring', stiffness: 260, damping: 22 }}
-      className={`group relative w-[280px] rounded-2xl border px-4 py-3.5 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-8px_rgba(0,0,0,0.12)] backdrop-blur-xl transition-shadow duration-200 hover:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_16px_32px_-8px_rgba(0,0,0,0.2)] ${
+      className={`group relative w-[320px] rounded-2xl border px-4 py-4 text-left shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-8px_rgba(0,0,0,0.12)] backdrop-blur-xl transition-shadow duration-200 hover:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_16px_32px_-8px_rgba(0,0,0,0.2)] ${
         aiSuggested
           ? 'border-dashed border-accent/40 bg-accent-soft/70'
           : 'border-line bg-surface'
@@ -111,6 +112,22 @@ function KnowledgeBlock({ data, id }) {
       />
 
       <div className="nodrag absolute right-2 top-2.5 flex items-center gap-0.5">
+        <button
+          type="button"
+          onClick={() => onExpand(id)}
+          title="Open larger"
+          className="flex h-5 w-5 items-center justify-center rounded-full text-subink/40 hover:bg-hover hover:text-ink"
+        >
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+            <path
+              d="M6 2.5H2.5V6M10 2.5h3.5V6M6 13.5H2.5V10M10 13.5h3.5V10"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
         <button
           type="button"
           onClick={() => onFieldChange(id, { unsure: !unsure })}
@@ -216,7 +233,7 @@ function KnowledgeBlock({ data, id }) {
             <p
               onDoubleClick={startLabelEdit}
               title="Double-click to rename"
-              className="truncate pr-14 text-[15px] font-semibold leading-tight text-ink"
+              className="truncate pr-20 text-[15.5px] font-semibold leading-tight text-ink"
             >
               {label}
             </p>
@@ -241,8 +258,8 @@ function KnowledgeBlock({ data, id }) {
         value={notes}
         onChange={(e) => onNotesChange(id, e.target.value)}
         placeholder={loading ? 'Researching…' : 'Add notes…'}
-        rows={3}
-        className={`nodrag nowheel mt-2 w-full resize-y rounded-lg border px-2 py-1.5 text-[12.5px] leading-snug text-ink/90 placeholder:text-subink/60 focus:outline-none focus:ring-1 focus:ring-accent/30 ${
+        rows={4}
+        className={`nodrag nowheel mt-2 w-full resize-y rounded-lg border px-2 py-1.5 text-[13px] leading-relaxed text-ink/90 placeholder:text-subink/60 focus:outline-none focus:ring-1 focus:ring-accent/30 ${
           aiFilled
             ? 'border-accent/30 bg-accent-soft'
             : 'border-line bg-sunken focus:border-accent/40'

@@ -50,23 +50,33 @@ const KNOWLEDGE_SCHEMA = {
         additionalProperties: false,
       },
       description:
-        'Up to 8 sub-topics worth exploring next, most important first. Omit any the user already has.',
+        'Sub-topics worth exploring next, most important first, up to the ceiling stated in the message. Fewer is correct when the topic does not warrant more. Omit any the user already has.',
     },
   },
   required: ['summary', 'correction', 'subtopics'],
   additionalProperties: false,
 };
 
-// The three depths the "Make a graph" menu offers. The level changes how the
-// model writes, not just how much the client draws — a Simple graph should be
-// readable by someone new to the subject, an Advanced one should not waste words
-// explaining the basics. Mirrors src/lib/graphLevels.js, which owns the
-// client-side counts.
+// How each depth in the "Make a graph" menu should be written. The level governs
+// the register, not the size — Concise and Detailed read the same way and differ
+// only in how many blocks the client asks for. Mirrors src/lib/graphLevels.js,
+// which owns the counts.
 const LEVEL_GUIDANCE = {
-  simple: `Write for someone meeting this subject for the first time. Keep "summary" to a single plain sentence, avoid jargon, and where a term is unavoidable, gloss it. For "subtopics", choose the few most fundamental parts of the subject, and keep each "detail" to one short, plain sentence.`,
+  simple: `Write for someone meeting this subject for the first time. Keep "summary" to a single plain sentence, avoid jargon, and where a term is unavoidable, gloss it. For "subtopics", choose the most fundamental parts of the subject, and keep each "detail" to one short, plain sentence.`,
+  concise: `Write for someone studying this subject seriously, but keep the graph small. Every "summary" and every "detail" should carry real substance — names, dates, numbers — while you choose only the sub-topics that genuinely matter most. Prefer few, weighty blocks over many thin ones.`,
   detailed: `Write for someone studying this subject seriously. Keep "summary" to at most two sentences, but make them carry specifics — names, dates, numbers. For "subtopics", cover the main branches of the subject, and make each "detail" a concrete sentence rather than a definition.`,
   advanced: `Write for someone who already knows the basics. Do not explain elementary terms. Keep "summary" to at most two dense sentences, and prefer precise, technical, specific content over general orientation. For "subtopics", include the less obvious branches a newcomer's overview would leave out, and make each "detail" carry a specific fact.`,
 };
+
+// How many sub-topics the caller will actually use. Sent so the prompt can state
+// the ceiling — and, more importantly, say that it is a ceiling.
+const MAX_SUBTOPICS = 8;
+
+export function normalizeMaxSubtopics(value) {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 1) return MAX_SUBTOPICS;
+  return Math.min(n, MAX_SUBTOPICS);
+}
 
 const DEFAULT_LEVEL = 'detailed';
 
@@ -102,8 +112,9 @@ function seedFrom(text) {
   return Math.abs(h);
 }
 
-function mockKnowledge({ topic, notes, level, context }) {
+function mockKnowledge({ topic, notes, level, context, maxSubtopics }) {
   const subject = normalizeContext(context)[0];
+  const cap = normalizeMaxSubtopics(maxSubtopics);
   // Offset the aspect list by the topic, otherwise every level picks the same
   // first aspect and a branch's children repeat their parent's label.
   const offset = seedFrom(topic);
@@ -114,7 +125,7 @@ function mockKnowledge({ topic, notes, level, context }) {
           subject ? ` as it applies to ${subject}` : ''
         } would go here. Set OPENAI_MOCK=0 for real output.`,
     correction: '',
-    subtopics: MOCK_ASPECTS.map((_, i) => {
+    subtopics: MOCK_ASPECTS.slice(0, cap).map((_, i) => {
       const aspect = MOCK_ASPECTS[(offset + i) % MOCK_ASPECTS.length];
       return {
         label: `${topic} — ${aspect}`,
@@ -136,7 +147,9 @@ Only populate "correction" when the notes contain a genuine factual error — a 
 
 Only populate "summary" when the notes are empty or say almost nothing. If the user has already written a reasonable account, leave it empty — do not overwrite their words.
 
-For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas. Give each one a short label and a single sentence of substance — the sentence is shown to the user as the starting content of that block, so it must say something, not merely restate the label.`;
+For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas. Give each one a short label and a single sentence of substance — the sentence is shown to the user as the starting content of that block, so it must say something, not merely restate the label.
+
+Never pad the list to reach a count. Some topics support many sub-topics and some support two; returning the honest number is always better than filling space.`;
 
 function readKey() {
   return process.env.OPENAI_API_KEY?.trim() || null;
@@ -184,12 +197,13 @@ export function normalizeContext(context) {
     .slice(0, 6);
 }
 
-export function buildPrompt({ topic, notes, childLabels, level, context }) {
+export function buildPrompt({ topic, notes, childLabels, level, context, maxSubtopics }) {
   const trimmedNotes = (notes ?? '').trim();
   const existing = (childLabels ?? []).filter(Boolean);
   const guidance = LEVEL_GUIDANCE[level] ?? LEVEL_GUIDANCE[DEFAULT_LEVEL];
   const path = normalizeContext(context);
   const subject = path[0];
+  const cap = normalizeMaxSubtopics(maxSubtopics);
 
   return [
     `Topic: ${topic}`,
@@ -204,13 +218,14 @@ export function buildPrompt({ topic, notes, childLabels, level, context }) {
     existing.length
       ? `Sub-topics already on their canvas: ${existing.join(', ')}`
       : 'They have no sub-topics on this branch yet.',
+    `Return AT MOST ${cap} sub-topics. That is a ceiling, not a target: return fewer — or none at all — when the topic genuinely does not have ${cap} parts worth a block of their own. Do not invent, split hairs, or pad the list to reach the number. A short, solid list is a better answer than a padded one.`,
     `Level: ${guidance}`,
   ].join('\n\n');
 }
 
-export async function generateKnowledge({ topic, notes, childLabels, level, context }) {
+export async function generateKnowledge({ topic, notes, childLabels, level, context, maxSubtopics }) {
   if (mockEnabled())
-    return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL, context });
+    return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL, context, maxSubtopics });
 
   const apiKey = readKey();
   if (!apiKey) {
@@ -225,7 +240,10 @@ export async function generateKnowledge({ topic, notes, childLabels, level, cont
     model: readModel(),
     messages: [
       { role: 'system', content: SYSTEM },
-      { role: 'user', content: buildPrompt({ topic, notes, childLabels, level, context }) },
+      {
+        role: 'user',
+        content: buildPrompt({ topic, notes, childLabels, level, context, maxSubtopics }),
+      },
     ],
     response_format: {
       type: 'json_schema',
@@ -257,7 +275,7 @@ export async function generateKnowledge({ topic, notes, childLabels, level, cont
         detail: String(s?.detail ?? '').trim(),
       }))
       .filter((s) => s.label)
-      .slice(0, 8),
+      .slice(0, normalizeMaxSubtopics(maxSubtopics)),
   };
 }
 
@@ -312,6 +330,7 @@ export async function handleKnowledgeRequest(req, res) {
       childLabels: Array.isArray(body.childLabels) ? body.childLabels : [],
       level,
       context: normalizeContext(body.context),
+      maxSubtopics: normalizeMaxSubtopics(body.maxSubtopics),
     });
     send(res, 200, result);
   } catch (error) {

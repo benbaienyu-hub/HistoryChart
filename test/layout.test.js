@@ -57,7 +57,7 @@ describe('autoLayout', () => {
       positioned('c', 'r', 200),
     ]);
     const xs = ['a', 'b', 'c'].map((id) => at(out, id).x).sort((p, q) => p - q);
-    for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(280);
+    for (let i = 1; i < xs.length; i++) expect(xs[i] - xs[i - 1]).toBeGreaterThanOrEqual(320);
   });
 
   it('separates two root trees', () => {

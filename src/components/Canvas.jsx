@@ -6,6 +6,7 @@ import KnowledgeBlock from './KnowledgeBlock';
 import ShareDialog from './ShareDialog';
 import RelationDialog from './RelationDialog';
 import GraphLevelMenu from './GraphLevelMenu';
+import BlockDetail from './BlockDetail';
 import StudyMode from './StudyMode';
 import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
 import { getCanvas, updateCanvas } from '../lib/canvasStore';
@@ -19,9 +20,9 @@ import ThemeToggle from './ThemeToggle';
 
 const nodeTypes = { knowledge: KnowledgeBlock };
 
-const ROOT_SPACING = 360;
-const CHILD_SPACING = 320;
-const LEVEL_HEIGHT = 230;
+const ROOT_SPACING = 400;
+const CHILD_SPACING = 364;
+const LEVEL_HEIGHT = 260;
 const EDGE_STYLE = { stroke: 'var(--color-edge)', strokeWidth: 1.5 };
 const RELATION_EDGE_STYLE = {
   stroke: 'var(--color-accent)',
@@ -117,6 +118,7 @@ export default function Canvas({ user, canvasId, onExit }) {
     onSubmitChild: (id, text) => handlersRef.current.onSubmitChild(id, text),
     onCancelChild: (id) => handlersRef.current.onCancelChild(id),
     onToggleCollapse: (id) => handlersRef.current.onToggleCollapse(id),
+    onExpand: (id) => handlersRef.current.onExpand(id),
     onDelete: (id) => handlersRef.current.onDelete(id),
   }).current;
 
@@ -141,6 +143,7 @@ export default function Canvas({ user, canvasId, onExit }) {
   const [aiReady, setAiReady] = useState(false);
   const [graphProgress, setGraphProgress] = useState(null);
   const [levelMenuOpen, setLevelMenuOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState(null);
   const levelButtonRef = useRef(null);
   const theme = useTheme();
   // These two React Flow props are passed to canvas/SVG attributes that
@@ -161,6 +164,8 @@ export default function Canvas({ user, canvasId, onExit }) {
   // What React Flow actually renders: collapsed subtrees marked hidden, plus
   // per-node child/hidden counts for the collapse control.
   const visible = useMemo(() => withVisibility(nodes, edges), [nodes, edges]);
+
+  const expandedNode = expandedId ? (nodes.find((n) => n.id === expandedId) ?? null) : null;
 
   // Always-current view of the graph, for closures that would otherwise go stale.
   const liveRef = useRef({ nodes, edges });
@@ -265,7 +270,9 @@ export default function Canvas({ user, canvasId, onExit }) {
       );
     },
     onLabelChange(id, text) {
-      pushHistory();
+      // Coalesced like notes: the expanded view binds straight to this on every
+      // keystroke, so without a key each character would be its own undo step.
+      pushHistory(`label:${id}`);
       setNodes((prev) =>
         prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, label: text } } : n))
       );
@@ -311,6 +318,9 @@ export default function Canvas({ user, canvasId, onExit }) {
       ]);
       setEdges((prev) => [...prev, makeEdge(parentId, newId)]);
       setAddingChildId(null);
+    },
+    onExpand(id) {
+      setExpandedId(id);
     },
     onToggleCollapse(id) {
       pushHistory();
@@ -491,13 +501,15 @@ export default function Canvas({ user, canvasId, onExit }) {
 
     let root;
     try {
-      root = await expandTopic({ topic, level: plan.key });
+      root = await expandTopic({ topic, level: plan.key, maxSubtopics: plan.maxBranches });
     } catch (error) {
       failRoot(`Couldn’t build the graph: ${error.message}`);
       return;
     }
 
-    const branches = root.subtopics.slice(0, plan.branches);
+    // The model was asked for at most this many and told not to pad, so a thin
+    // topic legitimately yields fewer. The slice is a backstop, not the policy.
+    const branches = root.subtopics.slice(0, plan.maxBranches);
     setGraphProgress({ done: 1, total: 1 + branches.length });
 
     // Land the root's own content, then the branch shells so the user watches
@@ -552,6 +564,7 @@ export default function Canvas({ user, canvasId, onExit }) {
             topic: branch.label,
             level: plan.key,
             context: [topic],
+            maxSubtopics: plan.maxLeaves,
           });
         } catch {
           setNodes((prev) =>
@@ -566,7 +579,7 @@ export default function Canvas({ user, canvasId, onExit }) {
         // The third level comes from the branch's own response, which returns a
         // one-line detail alongside each sub-topic label. That is what lets the
         // leaves arrive with something in them without costing a request each.
-        const leaves = result.subtopics.slice(0, plan.leaves);
+        const leaves = result.subtopics.slice(0, plan.maxLeaves);
         const leafIds = leaves.map(() => crypto.randomUUID());
 
         setNodes((prev) => [
@@ -1060,6 +1073,16 @@ export default function Canvas({ user, canvasId, onExit }) {
           onSave={updateRelation}
           onDelete={removeRelation}
           onCancel={() => setEditingRelation(null)}
+        />
+      )}
+
+      {expandedNode && (
+        <BlockDetail
+          node={expandedNode}
+          onClose={() => setExpandedId(null)}
+          onNotesChange={stable.onNotesChange}
+          onLabelChange={stable.onLabelChange}
+          onFieldChange={stable.onFieldChange}
         />
       )}
 

@@ -8,6 +8,7 @@ import {
   isKnownLevel,
   mockEnabled,
   normalizeContext,
+  normalizeMaxSubtopics,
 } from '../server/knowledgeRoutes.js';
 import { GRAPH_LEVELS } from '../src/lib/graphLevels.js';
 
@@ -112,7 +113,7 @@ describe('offline mode', () => {
   it('returns enough sub-topics for the widest level', async () => {
     vi.stubEnv('OPENAI_MOCK', '1');
     const { subtopics } = await generateKnowledge({ topic: 'Rome' });
-    const widest = Math.max(...GRAPH_LEVELS.map((l) => Math.max(l.branches, l.leaves)));
+    const widest = Math.max(...GRAPH_LEVELS.map((l) => Math.max(l.maxBranches, l.maxLeaves)));
     expect(subtopics.length).toBeGreaterThanOrEqual(widest);
   });
 
@@ -156,6 +157,39 @@ describe('offline mode', () => {
     expect(status).toBe(200);
     expect(json.summary).toContain('[offline sample]');
     expect(json.summary).toContain('advanced');
+  });
+});
+
+describe('sub-topic ceiling', () => {
+  it('states the cap in the prompt and calls it a ceiling, not a target', () => {
+    const prompt = buildPrompt({ topic: 'Rome', level: 'concise', maxSubtopics: 3 });
+    expect(prompt).toMatch(/AT MOST 3 sub-topics/);
+    expect(prompt).toMatch(/ceiling, not a target/i);
+    expect(prompt).toMatch(/Do not invent, split hairs, or pad/i);
+  });
+
+  it('never returns more than asked for', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    for (const cap of [1, 2, 5]) {
+      const { subtopics } = await generateKnowledge({ topic: 'Rome', maxSubtopics: cap });
+      expect(subtopics.length, `cap ${cap}`).toBeLessThanOrEqual(cap);
+    }
+  });
+
+  it('clamps a nonsensical cap rather than trusting it', () => {
+    expect(normalizeMaxSubtopics(99)).toBe(8);
+    expect(normalizeMaxSubtopics(0)).toBe(8);
+    expect(normalizeMaxSubtopics(-3)).toBe(8);
+    expect(normalizeMaxSubtopics(2.5)).toBe(8);
+    expect(normalizeMaxSubtopics('4')).toBe(4);
+    expect(normalizeMaxSubtopics(undefined)).toBe(8);
+    expect(normalizeMaxSubtopics('nonsense')).toBe(8);
+  });
+
+  it('the route applies the cap it was sent', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    const { json } = await call('POST', { topic: 'Rome', maxSubtopics: 2 });
+    expect(json.subtopics).toHaveLength(2);
   });
 });
 

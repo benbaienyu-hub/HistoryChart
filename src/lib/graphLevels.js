@@ -1,39 +1,53 @@
-// The three depths "Make a graph" can build. Kept here rather than in the
-// component so the sizing arithmetic — how many blocks, how many model requests
-// — can be tested, and so the menu and the generator can never disagree about
-// what a level means.
+// The depths "Make a graph" can build. Kept here rather than in the component so
+// the sizing arithmetic can be tested, and so the menu and the generator can
+// never disagree about what a level means.
 //
 // A generated graph is always three levels deep:
 //
 //   root            one block, with a summary
-//   └── branch      `branches` blocks, each with its own summary
-//       └── leaf    `leaves` blocks per branch, deliberately left empty
+//   └── branch      up to `maxBranches` blocks, each with its own summary
+//       └── leaf    up to `maxLeaves` per branch
 //
-// The leaves arrive blank on purpose. They are the prompts — the things the
-// canvas has identified as worth knowing but has not told you about, for you to
-// fill in yourself. Filling them is the point of the app, so generating their
-// text would defeat it.
+// The counts are CEILINGS, not quotas. Not every subject has six worthwhile
+// branches, and padding one out to hit a number produces filler blocks that make
+// the canvas worse. The model is told the cap and told explicitly not to reach for
+// it, so a thin topic yields a small graph even on Advanced.
+//
+// Two things vary independently: how much is generated, and how it is written.
+// `register` is the writing; the counts are the size. That is why Concise and
+// Detailed share a register but not a size.
 export const GRAPH_LEVELS = [
   {
     key: 'simple',
     label: 'Simple',
-    blurb: 'A plain overview. Short summaries, few branches.',
-    branches: 3,
-    leaves: 2,
+    blurb: 'Plain language, few blocks. Terms get explained.',
+    register: 'plain',
+    maxBranches: 3,
+    maxLeaves: 2,
+  },
+  {
+    key: 'concise',
+    label: 'Concise',
+    blurb: 'Substantial notes, but a small graph. Depth without sprawl.',
+    register: 'standard',
+    maxBranches: 3,
+    maxLeaves: 3,
   },
   {
     key: 'detailed',
     label: 'Detailed',
-    blurb: 'The usual choice. Fuller summaries and more ground covered.',
-    branches: 5,
-    leaves: 3,
+    blurb: 'The usual choice. Specifics, and more ground covered.',
+    register: 'standard',
+    maxBranches: 5,
+    maxLeaves: 3,
   },
   {
     key: 'advanced',
     label: 'Advanced',
-    blurb: 'Assumes some background. Precise, specific, and wider.',
-    branches: 6,
-    leaves: 4,
+    blurb: 'Assumes some background. Precise, technical, and wider.',
+    register: 'expert',
+    maxBranches: 6,
+    maxLeaves: 4,
   },
 ];
 
@@ -49,14 +63,13 @@ export function graphLevel(key) {
   return BY_KEY.get(key) ?? BY_KEY.get(DEFAULT_LEVEL);
 }
 
-// What choosing this level will cost, so the menu can say so before you click.
-// One request for the root plus one per branch; leaves need none, because they
-// are created empty.
+// The most this level will ever produce, so the menu can say "up to" before you
+// click. A real graph is often smaller, and that is the intended behaviour.
 export function graphPlan(key) {
   const level = graphLevel(key);
   return {
     ...level,
-    blocks: 1 + level.branches + level.branches * level.leaves,
-    requests: 1 + level.branches,
+    maxBlocks: 1 + level.maxBranches + level.maxBranches * level.maxLeaves,
+    maxRequests: 1 + level.maxBranches,
   };
 }

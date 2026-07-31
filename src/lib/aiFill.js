@@ -26,11 +26,11 @@ const PLACEHOLDER = {
   subtopics: [{ label: 'Suggested subtopic (connect AI)', detail: '' }],
 };
 
-async function requestKnowledge({ topic, notes, childLabels, level, context }) {
+async function requestKnowledge({ topic, notes, childLabels, level, context, maxSubtopics }) {
   const response = await fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ topic, notes, childLabels, level, context }),
+    body: JSON.stringify({ topic, notes, childLabels, level, context, maxSubtopics }),
   });
 
   if (response.status === 503) {
@@ -59,8 +59,15 @@ export function normalizeSubtopics(list) {
 // arrive empty. `level` decides how the summary is pitched. `context` is the chain
 // of ancestor labels — without it a branch called "Geography" gets defined rather
 // than described.
-export async function expandTopic({ topic, level, context }) {
-  const result = await requestKnowledge({ topic, notes: '', childLabels: [], level, context });
+export async function expandTopic({ topic, level, context, maxSubtopics }) {
+  const result = await requestKnowledge({
+    topic,
+    notes: '',
+    childLabels: [],
+    level,
+    context,
+    maxSubtopics,
+  });
   return {
     summary: result.summary ?? '',
     subtopics: normalizeSubtopics(result.subtopics),

@@ -10,25 +10,35 @@ import {
 const KEYS = GRAPH_LEVELS.map((l) => l.key);
 
 describe('GRAPH_LEVELS', () => {
-  it('offers exactly the three the menu shows', () => {
-    expect(KEYS).toEqual(['simple', 'detailed', 'advanced']);
+  it('offers exactly the four the menu shows', () => {
+    expect(KEYS).toEqual(['simple', 'concise', 'detailed', 'advanced']);
   });
 
-  it('gives every level a label, a blurb, and positive counts', () => {
+  it('gives every level a label, a blurb, a register, and positive ceilings', () => {
     for (const level of GRAPH_LEVELS) {
       expect(level.label).toBeTruthy();
       expect(level.blurb).toBeTruthy();
-      expect(level.branches).toBeGreaterThan(0);
-      expect(level.leaves).toBeGreaterThan(0);
+      expect(['plain', 'standard', 'expert']).toContain(level.register);
+      expect(level.maxBranches).toBeGreaterThan(0);
+      expect(level.maxLeaves).toBeGreaterThan(0);
     }
   });
 
-  it('gets wider as it gets deeper, so the names are honest', () => {
+  it('separates how much is generated from how it is written', () => {
+    // Concise exists to give detailed writing in a small graph, so it must share
+    // Detailed's register while asking for fewer blocks. If that ever collapses,
+    // the level is just a second Simple.
+    const concise = graphLevel('concise');
+    const detailed = graphLevel('detailed');
+    expect(concise.register).toBe(detailed.register);
+    expect(graphPlan('concise').maxBlocks).toBeLessThan(graphPlan('detailed').maxBlocks);
+    expect(concise.register).not.toBe(graphLevel('simple').register);
+  });
+
+  it('grows monotonically down the menu, so the ordering is honest', () => {
     for (let i = 1; i < GRAPH_LEVELS.length; i++) {
-      expect(GRAPH_LEVELS[i].branches).toBeGreaterThanOrEqual(GRAPH_LEVELS[i - 1].branches);
-      expect(GRAPH_LEVELS[i].leaves).toBeGreaterThanOrEqual(GRAPH_LEVELS[i - 1].leaves);
-      expect(graphPlan(GRAPH_LEVELS[i].key).blocks).toBeGreaterThan(
-        graphPlan(GRAPH_LEVELS[i - 1].key).blocks
+      expect(graphPlan(GRAPH_LEVELS[i].key).maxBlocks).toBeGreaterThan(
+        graphPlan(GRAPH_LEVELS[i - 1].key).maxBlocks
       );
     }
   });
@@ -37,13 +47,13 @@ describe('GRAPH_LEVELS', () => {
     // The response schema caps subtopics at 8; a level wanting more would
     // silently produce a narrower graph than its menu entry promises.
     for (const level of GRAPH_LEVELS) {
-      expect(level.branches).toBeLessThanOrEqual(8);
-      expect(level.leaves).toBeLessThanOrEqual(8);
+      expect(level.maxBranches).toBeLessThanOrEqual(8);
+      expect(level.maxLeaves).toBeLessThanOrEqual(8);
     }
   });
 
   it('keeps the request count small enough to be affordable', () => {
-    for (const key of KEYS) expect(graphPlan(key).requests).toBeLessThanOrEqual(8);
+    for (const key of KEYS) expect(graphPlan(key).maxRequests).toBeLessThanOrEqual(8);
   });
 
   it('has a default that is one of the levels', () => {
@@ -54,7 +64,7 @@ describe('GRAPH_LEVELS', () => {
 describe('isGraphLevel', () => {
   it('accepts the real keys and nothing else', () => {
     for (const key of KEYS) expect(isGraphLevel(key)).toBe(true);
-    for (const key of ['', 'SIMPLE', 'expert', null, undefined, 'toString']) {
+    for (const key of ['', 'SIMPLE', 'expert', 'brief', null, undefined, 'toString']) {
       expect(isGraphLevel(key), String(key)).toBe(false);
     }
   });
@@ -72,18 +82,19 @@ describe('graphLevel', () => {
 });
 
 describe('graphPlan', () => {
-  it('counts the whole three-level tree', () => {
+  it('counts the ceiling of the whole three-level tree', () => {
     // root + branches + (branches × leaves)
-    expect(graphPlan('simple')).toMatchObject({ branches: 3, leaves: 2, blocks: 10 });
-    expect(graphPlan('detailed')).toMatchObject({ branches: 5, leaves: 3, blocks: 21 });
-    expect(graphPlan('advanced')).toMatchObject({ branches: 6, leaves: 4, blocks: 31 });
+    expect(graphPlan('simple')).toMatchObject({ maxBranches: 3, maxLeaves: 2, maxBlocks: 10 });
+    expect(graphPlan('concise')).toMatchObject({ maxBranches: 3, maxLeaves: 3, maxBlocks: 13 });
+    expect(graphPlan('detailed')).toMatchObject({ maxBranches: 5, maxLeaves: 3, maxBlocks: 21 });
+    expect(graphPlan('advanced')).toMatchObject({ maxBranches: 6, maxLeaves: 4, maxBlocks: 31 });
   });
 
   it('counts one request for the root plus one per branch, and none for leaves', () => {
-    // Leaves are created empty, so they cost nothing.
+    // Leaf content rides along in the branch's response, so leaves cost nothing.
     for (const key of KEYS) {
       const plan = graphPlan(key);
-      expect(plan.requests).toBe(1 + plan.branches);
+      expect(plan.maxRequests).toBe(1 + plan.maxBranches);
     }
   });
 

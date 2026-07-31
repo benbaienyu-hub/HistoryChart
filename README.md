@@ -41,15 +41,21 @@ With a key set:
 - **Make a graph** (the button inside the search bar) generates a whole
   three-level graph for one topic. Clicking it asks how deep you want to go:
 
-  | | Branches | Sub-topics each | Blocks | Requests |
-  | --- | --- | --- | --- | --- |
-  | **Simple** | 3 | 2 | 10 | 4 |
-  | **Detailed** | 5 | 3 | 21 | 6 |
-  | **Advanced** | 6 | 4 | 31 | 7 |
+  | | Written for | Branches | Sub-topics each | Blocks | Requests |
+  | --- | --- | --- | --- | --- | --- |
+  | **Simple** | a newcomer | ≤ 3 | ≤ 2 | ≤ 10 | ≤ 4 |
+  | **Concise** | a serious reader | ≤ 3 | ≤ 3 | ≤ 13 | ≤ 4 |
+  | **Detailed** | a serious reader | ≤ 5 | ≤ 3 | ≤ 21 | ≤ 6 |
+  | **Advanced** | someone with background | ≤ 6 | ≤ 4 | ≤ 31 | ≤ 7 |
 
-  The level changes the writing as well as the size: Simple explains terms and
-  keeps summaries to a sentence, Advanced assumes you know the basics and goes
-  for precision. The whole graph is a single undo step, so ⌘Z removes all of it.
+  Two things vary independently — **how it's written** and **how much there is**.
+  That's what Concise is for: the same substance as Detailed, in a small graph.
+
+  **The counts are ceilings, not quotas.** Not every subject has six worthwhile
+  branches, and padding one out to hit a number produces filler blocks that make
+  the canvas worse. The model is told the cap *and* told not to reach for it, so
+  a thin topic gives a small graph even on Advanced. The whole graph is a single
+  undo step, so ⌘Z removes all of it.
 
   **Every block arrives with something in it, including the third level.** That
   costs no extra requests: each response returns its sub-topics as a label *plus*
@@ -57,7 +63,7 @@ With a key set:
   reply. It's why Detailed needs 6 requests for 21 blocks rather than 21.
 
   A side effect worth knowing: since study mode draws on any block with notes, a
-  generated graph is immediately a deck of 10, 21 or 31 cards.
+  generated graph is immediately a deck of however many blocks it produced.
 
   Each request carries the subject it sits under, not just its own label. A
   branch called "Geography" in an Ethiopia graph would otherwise come back as a
@@ -77,11 +83,21 @@ Without a key, "Make a graph" is disabled (hover it for why), the toolbar
 button reads "(no key)", and Fill inserts placeholder text. Enter is unaffected,
 since it never calls out.
 
-Notes longer than the box scroll with a trackpad or wheel while the pointer is
-over them, and the box can be dragged taller by its bottom-right corner. React
-Flow claims wheel events to zoom the canvas, so the notes field opts out with
-its `nowheel` class — otherwise two-finger scrolling over long notes zoomed the
-graph and the scrollbar was the only way to read past the third line.
+## Reading and writing a block
+
+Each block carries an **expand** button in its top-right corner, which opens it
+at about half the screen: a large title field, the metadata, and a full-height
+notes area. It edits the same fields through the same handlers as the block
+itself — there is no separate draft, so what you type is already saved and
+already undoable — and it renders outside the canvas viewport, so the zoom level
+doesn't scale it.
+
+On the block itself, notes longer than the box scroll with a trackpad or wheel
+while the pointer is over them, and the box can be dragged taller by its
+bottom-right corner. React Flow claims wheel events to zoom the canvas, so the
+notes field opts out with its `nowheel` class — otherwise two-finger scrolling
+over long notes zoomed the graph and the scrollbar was the only way to read past
+the fourth line.
 
 ### How the key is kept safe
 
@@ -182,6 +198,7 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/graph.js` | Pure tree helpers — descendants, collapse visibility |
 | `src/lib/graphLevels.js` | The Simple / Detailed / Advanced depths and their sizing |
 | `src/components/GraphLevelMenu.jsx` | The depth picker that drops out of "Make a graph" |
+| `src/components/BlockDetail.jsx` | The half-screen expanded view of one block |
 | `src/lib/layout.js` | Tidy-tree layout over the `parentId` forest |
 | `src/lib/deck.js` | Flashcard selection and deterministic shuffle |
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |

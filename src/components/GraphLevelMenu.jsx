@@ -57,6 +57,9 @@ export default function GraphLevelMenu({ open, onChoose, onClose, anchorRef }) {
           <p className="border-b border-line px-3.5 py-2.5 text-[11px] font-medium uppercase tracking-wide text-subink">
             How deep?
           </p>
+          <p className="border-b border-line px-3.5 py-2 text-[11px] leading-snug text-subink/80">
+            Block counts are ceilings. A thin topic gives a smaller graph.
+          </p>
 
           {GRAPH_LEVELS.map((level, i) => {
             const plan = graphPlan(level.key);
@@ -72,7 +75,7 @@ export default function GraphLevelMenu({ open, onChoose, onClose, anchorRef }) {
                 <span className="flex items-baseline justify-between gap-2">
                   <span className="text-[13.5px] font-semibold text-ink">{level.label}</span>
                   <span className="shrink-0 text-[11px] tabular-nums text-subink">
-                    {plan.blocks} blocks
+                    up to {plan.maxBlocks}
                   </span>
                 </span>
                 <span className="mt-0.5 block text-[11.5px] leading-snug text-subink">
