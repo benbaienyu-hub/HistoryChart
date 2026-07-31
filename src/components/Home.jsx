@@ -146,7 +146,7 @@ function CanvasCard({ canvas, index, onOpen, actions }) {
 
       {canvas.lastScore && (
         <p className="mt-1 text-[11.5px] text-accent">
-          Last studied {canvas.lastScore.correct}/{canvas.lastScore.total}
+          Last studied {canvas.lastScore.correct}/{canvas.lastScore.total} points
         </p>
       )}
 

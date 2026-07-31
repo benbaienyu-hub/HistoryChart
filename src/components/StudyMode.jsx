@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { categoryColor, categoryLabel } from '../lib/categories';
-import { buildDeck, flaggedCardCount } from '../lib/deck';
+import { buildDeck, flaggedCardCount, gradeCard, sessionTally } from '../lib/deck';
 
 export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
   const [seed, setSeed] = useState(1);
@@ -15,37 +15,49 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
 
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
-  const [missed, setMissed] = useState([]);
-  const [gotCount, setGotCount] = useState(0);
+  // Which points of the current card the user says they had. Grading is a
+  // fraction, not a verdict, so this is the whole answer to "how did I do".
+  const [ticked, setTicked] = useState([]);
+  const [grades, setGrades] = useState([]);
   const [done, setDone] = useState(false);
 
   const flaggedCount = flaggedCardCount(nodes);
   const card = deck[index];
+  // Memoised so the key handler's deps don't churn on every render — the empty
+  // fallback would otherwise be a new array each time.
+  const points = useMemo(() => card?.points ?? [], [card]);
+  const single = points.length === 1;
 
   const restart = useCallback((opts = {}) => {
     setIndex(0);
     setRevealed(false);
-    setMissed([]);
-    setGotCount(0);
+    setTicked([]);
+    setGrades([]);
     setDone(false);
     if (opts.reshuffle) setSeed((s) => s + 1);
   }, []);
 
-  const score = useCallback(
-    (gotIt) => {
+  const toggle = useCallback((i) => {
+    setTicked((t) => (t.includes(i) ? t.filter((x) => x !== i) : [...t, i]));
+  }, []);
+
+  const commit = useCallback(
+    (recalled) => {
       if (!card) return;
-      if (gotIt) setGotCount((c) => c + 1);
-      else setMissed((m) => [...m, card]);
+      const next = [...grades, gradeCard(card, recalled)];
+      setGrades(next);
 
       if (index + 1 >= deck.length) {
         setDone(true);
-        onFinish?.({ correct: gotIt ? gotCount + 1 : gotCount, total: deck.length });
+        const tally = sessionTally(next);
+        onFinish?.({ correct: tally.recalled, total: tally.total });
       } else {
         setIndex((i) => i + 1);
         setRevealed(false);
+        setTicked([]);
       }
     },
-    [card, index, deck.length, gotCount, onFinish]
+    [card, grades, index, deck.length, onFinish]
   );
 
   useEffect(() => {
@@ -55,18 +67,36 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
         return;
       }
       if (done || !card) return;
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault();
-        if (!revealed) setRevealed(true);
+      if (!revealed) {
+        if (e.key === ' ' || e.key === 'Enter') {
+          e.preventDefault();
+          setRevealed(true);
+        }
         return;
       }
-      if (!revealed) return;
-      if (e.key === 'ArrowRight') score(true);
-      if (e.key === 'ArrowLeft') score(false);
+      if (e.key === 'ArrowRight' || e.key === 'Enter') {
+        e.preventDefault();
+        commit(ticked);
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        commit([]);
+        return;
+      }
+      if (e.key === 'a' || e.key === 'A') {
+        setTicked(points.map((_, i) => i));
+        return;
+      }
+      // 1–9 tick a point directly, so a card can be graded without the mouse.
+      const digit = Number(e.key);
+      if (Number.isInteger(digit) && digit >= 1 && digit <= points.length) {
+        e.preventDefault();
+        toggle(digit - 1);
+      }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [revealed, card, done, score, onExit]);
+  }, [revealed, card, done, commit, onExit, ticked, points, toggle]);
 
   const header = (
     <div className="flex items-center gap-4">
@@ -124,8 +154,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
   }
 
   if (done) {
-    const total = gotCount + missed.length;
-    const pct = total ? Math.round((gotCount / total) * 100) : 0;
+    const tally = sessionTally(grades);
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 backdrop-blur-xl">
         <div className="border-b border-line bg-surface px-5 py-3">{header}</div>
@@ -136,28 +165,40 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
             className="w-full max-w-md rounded-3xl border border-line bg-panel p-7 text-center shadow-[0_16px_48px_-16px_rgba(0,0,0,0.2)]"
           >
             <p className="text-[13px] font-medium uppercase tracking-wide text-subink">Session complete</p>
-            <p className="mt-2 text-[44px] font-semibold leading-none tracking-tight text-ink">
-              {gotCount}
-              <span className="text-[24px] text-subink">/{total}</span>
+            <p className="mt-2 flex items-baseline justify-center gap-1 text-[44px] font-semibold leading-tight tracking-tight text-ink">
+              {tally.recalled}
+              <span className="text-[22px] font-medium text-subink">/ {tally.total}</span>
             </p>
-            <p className="mt-1.5 text-[13.5px] text-subink">{pct}% recalled</p>
+            <p className="text-[11.5px] uppercase tracking-wide text-subink/80">points recalled</p>
+            <p className="mt-2 text-[13.5px] text-subink">
+              {tally.pct}% · {tally.fullyRecalled} of {tally.cards} cards in full
+            </p>
 
-            {missed.length > 0 && (
+            {tally.missed.length > 0 && (
               <div className="mt-5 text-left">
                 <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-subink/80">
-                  Worth another look
+                  Points that got away
                 </p>
-                <div className="max-h-40 space-y-1 overflow-y-auto">
-                  {missed.map((m) => (
-                    <div
-                      key={m.id}
-                      className="flex items-center gap-2 rounded-lg bg-sunken px-2.5 py-1.5"
-                    >
-                      <span
-                        className="h-2 w-2 shrink-0 rounded-full"
-                        style={{ backgroundColor: categoryColor(m.category) }}
-                      />
-                      <span className="truncate text-[12.5px] text-ink">{m.label}</span>
+                <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                  {tally.missed.map((m) => (
+                    <div key={m.id} className="rounded-lg bg-sunken px-2.5 py-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-2 w-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: categoryColor(m.category) }}
+                        />
+                        <span className="truncate text-[12.5px] font-medium text-ink">{m.label}</span>
+                        <span className="ml-auto shrink-0 text-[11px] tabular-nums text-subink">
+                          {m.recalled}/{m.total}
+                        </span>
+                      </div>
+                      <ul className="mt-1 space-y-0.5 pl-4">
+                        {m.missedPoints.map((p, i) => (
+                          <li key={i} className="text-[12px] leading-snug text-subink">
+                            · {p}
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   ))}
                 </div>
@@ -165,17 +206,16 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
             )}
 
             <div className="mt-6 flex flex-col gap-2">
-              {missed.length > 0 && (
+              {tally.missed.length > 0 && (
                 <button
                   type="button"
                   onClick={() => {
-                    const ids = missed.map((m) => m.id);
-                    setRestrictTo(ids);
+                    setRestrictTo(tally.missed.map((m) => m.id));
                     restart();
                   }}
                   className="rounded-xl bg-accent py-2.5 text-[13.5px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.3)]"
                 >
-                  Retry the {missed.length} I missed
+                  Retry the {tally.missed.length} with gaps
                 </button>
               )}
               <button
@@ -221,7 +261,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
         </div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center px-6 py-6">
+      <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-6">
         <div className="w-full max-w-xl">
           <AnimatePresence mode="wait">
             <motion.div
@@ -256,17 +296,52 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                 {card.label}
               </p>
 
-              <div className="mt-4 min-h-[92px] rounded-2xl border border-line bg-sunken p-4">
+              {/* Saying how many points there are turns "reproduce the paragraph"
+                  into a target you can actually hit. */}
+              <p className="mt-1.5 text-[12.5px] text-subink">
+                {single ? '1 point to recall' : `${points.length} points to recall`}
+              </p>
+
+              <div className="mt-4 min-h-[92px] rounded-2xl border border-line bg-sunken p-3">
                 <AnimatePresence mode="wait">
                   {revealed ? (
-                    <motion.p
-                      key="answer"
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      className="whitespace-pre-wrap text-[14px] leading-relaxed text-ink/90"
-                    >
-                      {card.notes}
-                    </motion.p>
+                    <motion.div key="answer" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                      <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wide text-subink/80">
+                        Tick what you had
+                      </p>
+                      <ul className="space-y-1">
+                        {points.map((point, i) => {
+                          const on = ticked.includes(i);
+                          return (
+                            <li key={i}>
+                              <button
+                                type="button"
+                                onClick={() => toggle(i)}
+                                aria-pressed={on}
+                                className={`flex w-full items-start gap-2.5 rounded-xl border px-2.5 py-2 text-left transition-colors ${
+                                  on
+                                    ? 'border-accent/40 bg-accent-soft text-ink'
+                                    : 'border-transparent text-ink/80 hover:bg-hover'
+                                }`}
+                              >
+                                <span
+                                  className={`mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md border text-[10.5px] font-semibold tabular-nums ${
+                                    on
+                                      ? 'border-accent bg-accent text-white'
+                                      : 'border-line2 text-subink'
+                                  }`}
+                                >
+                                  {on ? '✓' : i + 1}
+                                </span>
+                                <span className="text-[14px] leading-relaxed whitespace-pre-wrap">
+                                  {point}
+                                </span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </motion.div>
                   ) : (
                     <motion.button
                       key="prompt"
@@ -274,7 +349,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                       initial={{ opacity: 0 }}
                       animate={{ opacity: 1 }}
                       onClick={() => setRevealed(true)}
-                      className="flex h-full min-h-[60px] w-full items-center justify-center text-[13.5px] text-subink hover:text-ink"
+                      className="flex h-full min-h-[68px] w-full items-center justify-center text-[13.5px] text-subink hover:text-ink"
                     >
                       What do you remember? Tap or press Space to reveal.
                     </motion.button>
@@ -285,24 +360,7 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
           </AnimatePresence>
 
           <div className="mt-5 flex items-center justify-center gap-2.5">
-            {revealed ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => score(false)}
-                  className="rounded-xl border border-line2 bg-panel px-5 py-2.5 text-[13.5px] font-medium text-subink hover:border-danger hover:bg-danger-bg hover:text-danger"
-                >
-                  ← Missed it
-                </button>
-                <button
-                  type="button"
-                  onClick={() => score(true)}
-                  className="rounded-xl bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.3)]"
-                >
-                  Got it →
-                </button>
-              </>
-            ) : (
+            {!revealed && (
               <button
                 type="button"
                 onClick={() => setRevealed(true)}
@@ -311,10 +369,50 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                 Reveal
               </button>
             )}
+            {revealed && single && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => commit([])}
+                  className="rounded-xl border border-line2 bg-panel px-5 py-2.5 text-[13.5px] font-medium text-subink hover:border-danger hover:bg-danger-bg hover:text-danger"
+                >
+                  ← Missed it
+                </button>
+                <button
+                  type="button"
+                  onClick={() => commit([0])}
+                  className="rounded-xl bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.3)]"
+                >
+                  Got it →
+                </button>
+              </>
+            )}
+            {revealed && !single && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setTicked(ticked.length === points.length ? [] : points.map((_, i) => i))
+                  }
+                  className="rounded-xl border border-line2 bg-panel px-4 py-2.5 text-[13.5px] text-subink hover:bg-hover hover:text-ink"
+                >
+                  {ticked.length === points.length ? 'Clear' : 'Tick all'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => commit(ticked)}
+                  className="rounded-xl bg-accent px-5 py-2.5 text-[13.5px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.3)]"
+                >
+                  Next → <span className="tabular-nums opacity-80">{ticked.length}/{points.length}</span>
+                </button>
+              </>
+            )}
           </div>
 
           <p className="mt-3 text-center text-[11.5px] text-subink/70">
-            Space reveals · ← missed · → got it · Esc closes
+            {revealed && !single
+              ? '1–9 tick a point · A all · → next · Esc closes'
+              : 'Space reveals · ← missed · → got it · Esc closes'}
           </p>
         </div>
       </div>
