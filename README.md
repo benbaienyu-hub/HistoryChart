@@ -217,6 +217,36 @@ import { handleKnowledgeRequest } from './server/knowledgeRoutes.js'
 app.post('/api/knowledge', handleKnowledgeRequest)
 ```
 
+## The logo
+
+The mark is `[- -]` — the editorial notation for an omission, which is how a
+missing passage is marked in a manuscript. That is what a *lacuna* is, so the
+mark says the name rather than decorating it.
+
+It is one shape at every size, with no separate small variant. The constraint
+that drove the drawing was the 16px favicon: at lighter weights the two round
+stroke caps close the gap optically and the mark reads as a single dash, which
+throws away the only idea it has. Hence a 3-unit stroke in a 32-unit box and a
+gap wider than the stroke — `test/logo.test.js` asserts that ratio so a later
+tidy-up can't quietly break it.
+
+| File | Use |
+| --- | --- |
+| `public/favicon.svg` | tab icon — the mark reversed out of a blue tile, so it holds against light and dark browser chrome |
+| `public/logo.svg` | the bare mark, blue, transparent behind it |
+| `public/logo-lockup.svg` | mark + wordmark for light backgrounds |
+| `public/logo-lockup-dark.svg` | the same for dark ones — the wordmark inverts, the blue doesn't need to |
+
+All four are **generated**, not hand-edited: `src/lib/logoMark.js` holds the
+geometry, `npm run logo` writes the files, and a test fails if what's committed
+no longer matches. In the app the mark is `src/components/Logo.jsx`, drawn in
+`currentColor` so it needs no light/dark variant at all.
+
+One caveat on the lockups: the wordmark is live text in the app's font stack, not
+outlined glyphs (there's no font tooling in this repo to outline with), so it
+renders in whatever font the viewer has. Fine on the web; worth checking before
+it goes into a printed deck.
+
 ## Studying
 
 Any block with notes is a card, with the title as the prompt. Cards are graded
@@ -291,6 +321,8 @@ hardcode white or black and both themes stay in sync.
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
 | `src/lib/canvasStore.js` | Canvas persistence (localStorage) |
 | `src/lib/migrate.js` | One-time move of pre-rename storage keys |
+| `src/lib/logoMark.js` | The logo's geometry — one source for the icon and the favicon |
+| `src/components/Logo.jsx` | The mark as a React component, in `currentColor` |
 | `scripts/check-key.mjs` | Diagnoses a rejected key against whichever provider is configured |
 | `src/lib/templates.js` | Pre-built starter canvases |
 | `test/` | Vitest suite over everything in `src/lib` and the API route |
@@ -317,6 +349,7 @@ npm run lint     # oxlint
 npm test         # vitest, single run
 npm run check-key   # diagnose an OPENAI_API_KEY that isn't working
 npm run demo        # dev server in offline mode — no key, no network, no bill
+npm run logo        # regenerate public/*.svg from the shared mark geometry
 npm run test:watch
 ```
 

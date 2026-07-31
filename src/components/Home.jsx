@@ -9,6 +9,7 @@ import {
 } from '../lib/canvasStore';
 import { categoryColor } from '../lib/categories';
 import { buildTemplateGraph, listTemplates } from '../lib/templates';
+import Logo from './Logo';
 import ShareDialog from './ShareDialog';
 import ThemeToggle from './ThemeToggle';
 
@@ -295,7 +296,10 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
   return (
     <div className="min-h-screen bg-canvas">
       <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-line bg-surface px-6 py-3 backdrop-blur-xl">
-        <h1 className="text-[17px] font-semibold tracking-tight text-ink">Lacuna</h1>
+        <div className="flex items-center gap-2">
+          <Logo size={21} className="text-accent" />
+          <h1 className="text-[17px] font-semibold tracking-tight text-ink">Lacuna</h1>
+        </div>
         <div className="ml-auto flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           <span className="hidden text-[12.5px] text-subink sm:block">{user.email}</span>

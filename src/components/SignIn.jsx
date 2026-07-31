@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { isValidEmail, listUsers, signIn } from '../lib/auth';
+import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 
 export default function SignIn({ onSignedIn }) {
@@ -30,9 +31,10 @@ export default function SignIn({ onSignedIn }) {
         transition={{ type: 'spring', stiffness: 220, damping: 24 }}
         className="w-full max-w-[380px] rounded-3xl border border-line bg-surface p-8 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_24px_48px_-16px_rgba(0,0,0,0.18)] backdrop-blur-xl"
       >
-        <h1 className="text-center text-[26px] font-semibold tracking-tight text-ink">
-          Lacuna
-        </h1>
+        <div className="flex flex-col items-center gap-2.5">
+          <Logo size={40} className="text-accent" label="Lacuna" />
+          <h1 className="text-[26px] font-semibold tracking-tight text-ink">Lacuna</h1>
+        </div>
         <p className="mt-1.5 text-center text-[13.5px] leading-snug text-subink">
           Map what you know, then let AI fill the gaps.
         </p>
