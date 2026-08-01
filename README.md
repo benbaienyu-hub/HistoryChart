@@ -13,6 +13,75 @@ ones in your own notes is the point of the app.
 > the `historychart:` prefix to `lacuna:`; `src/lib/migrate.js` moves existing
 > data across on first load, so an upgrade keeps your canvases.
 
+## Accounts and sharing
+
+Sign-in is real: an account with a password, a session in an httpOnly cookie, and
+canvases stored on the server rather than in one browser. Sharing is a permission
+row on that server, so a canvas you share reaches the other person on their own
+machine.
+
+```
+POST /api/auth/register     create an account, and sign in
+POST /api/auth/login        email + password
+POST /api/auth/logout       invalidates the session server-side
+GET  /api/auth/me           who is signed in, if anyone
+
+GET    /api/canvases            { owned, shared }
+POST   /api/canvases            create
+GET    /api/canvases/:id        read (404 if it isn't yours or shared with you)
+PUT    /api/canvases/:id        save
+DELETE /api/canvases/:id        owner only
+POST   /api/canvases/:id/share    { email, role }
+POST   /api/canvases/:id/unshare  { email }
+```
+
+**Passwords** are hashed with scrypt and a per-user salt, compared in constant time,
+and never leave the server — `publicUser()` is an allowlist of four fields, so
+leaking a hash would take a deliberate mistake. Sign-in is throttled to ten attempts
+per address per fifteen minutes, and answers identically for a wrong password and a
+non-existent account, so the endpoint can't be used to find out who has one.
+
+**The session** is a 32-byte random token in an `HttpOnly`, `SameSite=Lax` cookie,
+with `Secure` set automatically once the request arrives over https. HttpOnly is the
+point: no script on the page can read it, which a token in `localStorage` cannot
+promise. Signing out deletes the row server-side, so the token is dead even if it
+had been copied.
+
+**Sharing** grants `edit` or `view` by email:
+
+- Grants are keyed on the **email, not a user id**, so you can invite someone who hasn't signed up yet — it's waiting when they register with that address, and the dialog says so when that's the case.
+- `edit` can change a canvas but not delete it or re-share it. Deleting other people's work is not something "can edit" should imply.
+- A canvas you can't reach answers **404, not 403** — 403 would confirm it exists, which is information about someone else's library.
+- Shared editing is **last-write-wins**, and a save happens only when you have actually changed something. That second half matters: flushing on page-close regardless would mean a tab left open on an old version silently overwrote the other person's edits when it closed. That bug was real until it was caught in testing.
+
+**No invite email is sent.** Sending mail needs an account with a mail provider;
+until then the dialog says so plainly and tells you to pass the word on yourself.
+
+### Where the data lives
+
+Accounts and canvases live in one JSON file (`.data/lacuna.json`, gitignored),
+written atomically — temp file plus rename, so a crash mid-write leaves the last
+good copy rather than a half-written one. Not SQLite: `node:sqlite` is experimental
+and absent before Node 22.5, and `better-sqlite3` is a native module that has to
+compile, which turns "clone and run" into a build-tools problem on someone else's
+laptop. Everything goes through `readDb`/`mutate` in `server/store.js`, so swapping
+in a real database when the numbers justify it touches that one module.
+
+Set `LACUNA_DATA` to put the file elsewhere — on a host, somewhere that survives a
+redeploy.
+
+### Deploying it
+
+```bash
+npm run build
+npm start          # PORT=8080 to change the port
+```
+
+`npm start` serves the built app and the API from one Node process, so the cookie
+works with no CORS setup. **Put it behind HTTPS** — the cookie only sets `Secure`
+when the request arrives over https, so a plain-http deployment would send sessions
+in the clear.
+
 ## Business plan
 
 `BUSINESS_PLAN.md` covers positioning, the freemium model, unit economics computed
@@ -352,7 +421,14 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
-| `src/lib/canvasStore.js` | Canvas persistence (localStorage), and the unique-title rule |
+| `src/lib/api.js` | Client side of the account API |
+| `server/api.js` | The API router, mounted by both the dev and the production server |
+| `server/accounts.js` | Password hashing, sessions, sign-in throttling |
+| `server/canvasRoutes.js` | Canvas CRUD, share grants, permission checks |
+| `server/store.js` | The JSON data store, written atomically |
+| `server/index.mjs` | The standalone server — `npm start` |
+| `src/lib/titles.js` | The unique-title rule, shared by the client and the server |
+| `src/lib/canvasStore.js` | Pre-account local canvases, kept for import, plus the last-opened pointer |
 | `src/lib/canvasSearch.js` | Library search — matching, ranking, and highlight ranges |
 | `src/lib/migrate.js` | One-time move of pre-rename storage keys |
 | `src/lib/logoMark.js` | The logo's geometry — one source for the icon and the favicon |
@@ -382,6 +458,7 @@ npm run preview  # serve the build — no AI route, see Deploying
 npm run lint     # oxlint
 npm test         # vitest, single run
 npm run check-key   # diagnose an OPENAI_API_KEY that isn't working
+npm start           # serve the built app + API from one Node process
 npm run demo        # dev server in offline mode — no key, no network, no bill
 npm run logo        # regenerate public/*.svg from the shared mark geometry
 npm run test:watch

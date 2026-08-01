@@ -149,17 +149,22 @@ note content, unique canvas titles, undo/redo, light and dark themes, starter ex
 canvases, and an offline demo mode that needs no API key. 343 automated tests.
 Provider-agnostic AI: OpenAI, Groq, or a local model.
 
-**Not built.** There is no server. Accounts are a local profile switcher with no
-password, canvases live in one browser's storage, sharing works only between profiles
-on the same machine, and nothing syncs. **There is therefore nothing to sell yet** —
-you cannot charge a subscription for data that lives in one browser and vanishes with
-it.
+**Accounts and sharing are real now.** A password-backed account (scrypt with a
+per-user salt), a session in an httpOnly cookie, canvases stored server-side, and
+sharing as a permission row granting edit or view access by email — including to
+someone who hasn't signed up yet. `npm start` serves the built app and the API from
+one Node process, so it can go on a host.
+
+**Not built.** No invite emails (that needs a mail-provider account), no password
+reset, no live simultaneous editing — shared editing is last-write-wins — and no
+billing. The store is a JSON file rather than a database, which is honest at this
+scale and is one module to swap.
 
 ### Roadmap
 
 | Phase | Work | Why it's in this order |
 | --- | --- | --- |
-| **1. Make it sellable** | Real accounts, a server, sync, per-user AI quotas, Stripe | Every revenue line above depends on this and nothing else does. It is the one genuine engineering lift |
+| **1. Make it sellable** | ~~Accounts, a server, sync~~ **(built)**; still needed: per-user AI quotas, password reset, Stripe | Every revenue line depends on this. The hard half — real identity and server-side canvases — is done and tested |
 | **2. Make it stick** | Spaced-repetition scheduling driven by the per-point grades already recorded; Anki and PDF export; shareable public canvases; mobile polish | Retention and the growth loop. Scheduling is the feature that turns a study tool into a habit |
 | **3. Make it institutional** | Teacher dashboard: assign a canvas, see which specific points a class is missing | The per-point data is the product no competitor has. A class-wide gap report is worth more to a teacher than any number of scores |
 

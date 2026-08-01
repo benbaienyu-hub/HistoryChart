@@ -1,12 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import {
-  canvasesOwnedBy,
-  canvasesSharedWith,
-  createCanvas,
-  deleteCanvas,
-  renameCanvas,
-} from '../lib/canvasStore';
+import { canvasesOwnedBy as localCanvases, clearLocalCanvases } from '../lib/canvasStore';
+import { createCanvas, deleteCanvas, fetchCanvases, saveCanvas } from '../lib/api';
 import { categoryColor } from '../lib/categories';
 import {
   highlightSegments,
@@ -331,16 +326,36 @@ function NoMatches({ query, onClear, elsewhere, onGo }) {
 }
 
 export default function Home({ user, onOpenCanvas, onSignOut }) {
-  // Bumping this re-renders, which re-reads the store below after a mutation.
-  const [, setVersion] = useState(0);
-  const refresh = useCallback(() => setVersion((v) => v + 1), []);
+  const [library, setLibrary] = useState({ owned: [], shared: [] });
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [busy, setBusy] = useState(false);
   const [sharing, setSharing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [tab, setTab] = useState('mine');
   const [query, setQuery] = useState('');
+  // Canvases from before this browser had an account. Offered for import rather
+  // than moved silently — it is the user's data and they should choose.
+  const [strays, setStrays] = useState(() => localCanvases(user.email));
 
-  const owned = canvasesOwnedBy(user.email);
-  const shared = canvasesSharedWith(user.email);
+  const refresh = useCallback(
+    () =>
+      fetchCanvases()
+        .then((next) => {
+          setLibrary(next);
+          setLoadError(null);
+        })
+        .catch((problem) => setLoadError(problem.message))
+        .finally(() => setLoading(false)),
+    []
+  );
+
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  const owned = library.owned;
+  const shared = library.shared;
   const templates = listTemplates();
 
   const searching = parseQuery(query).length > 0;
@@ -382,32 +397,67 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
   // another tab, is a dead end you can't see out of. Name it instead.
   const elsewhere = TABS.filter((t) => t.key !== tab && t.count > 0);
 
+  // Every mutation is a request now, so each one can fail. `guard` keeps that in
+  // one place: report it, and never leave the button spinning.
+  async function guard(work) {
+    setBusy(true);
+    try {
+      return await work();
+    } catch (problem) {
+      setLoadError(problem.message);
+      return null;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function handleNew() {
-    const canvas = createCanvas({ ownerEmail: user.email });
-    onOpenCanvas(canvas.id);
+    guard(async () => {
+      const canvas = await createCanvas();
+      onOpenCanvas(canvas.id);
+    });
   }
 
   function handleUseTemplate(key) {
     const graph = buildTemplateGraph(key);
     if (!graph) return;
-    const canvas = createCanvas({
-      ownerEmail: user.email,
-      title: graph.title,
-      nodes: graph.nodes,
-      edges: graph.edges,
+    guard(async () => {
+      const canvas = await createCanvas({
+        title: graph.title,
+        nodes: graph.nodes,
+        edges: graph.edges,
+      });
+      onOpenCanvas(canvas.id);
     });
-    onOpenCanvas(canvas.id);
   }
 
   function handleRename(id, title) {
-    renameCanvas(id, title);
-    refresh();
+    guard(async () => {
+      await saveCanvas(id, { title });
+      await refresh();
+    });
   }
 
   function handleDeleteConfirmed() {
-    deleteCanvas(confirmDelete.id);
+    const target = confirmDelete;
     setConfirmDelete(null);
-    refresh();
+    guard(async () => {
+      await deleteCanvas(target.id);
+      await refresh();
+    });
+  }
+
+  // Uploads the canvases still sitting in this browser, then clears them so the
+  // import can't be run twice and leave duplicates.
+  function importStrays() {
+    guard(async () => {
+      for (const canvas of strays) {
+        await createCanvas({ title: canvas.title, nodes: canvas.nodes, edges: canvas.edges });
+      }
+      clearLocalCanvases(user.email);
+      setStrays([]);
+      await refresh();
+    });
   }
 
   const ownedActions = {
@@ -474,7 +524,8 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
           <button
             type="button"
             onClick={handleNew}
-            className="mt-3 w-full rounded-xl bg-accent px-3 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)]"
+            disabled={busy}
+            className="mt-3 w-full rounded-xl bg-accent px-3 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)] disabled:opacity-60"
           >
             + New canvas
           </button>
@@ -513,12 +564,66 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               onClick={handleNew}
-              className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)] md:hidden"
+              disabled={busy}
+              className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)] disabled:opacity-60 md:hidden"
             >
               + New canvas
             </motion.button>
           </div>
 
+          {loadError && (
+            <div className="mt-5 rounded-2xl border border-danger/30 bg-danger-bg px-4 py-3">
+              <p className="text-[13px] text-danger">{loadError}</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setLoadError(null);
+                  refresh();
+                }}
+                className="mt-1.5 text-[12.5px] font-medium text-danger underline"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {strays.length > 0 && (
+            <div className="mt-5 rounded-2xl border border-accent/30 bg-accent-soft px-4 py-3">
+              <p className="text-[13px] font-medium text-ink">
+                {strays.length} canvas{strays.length === 1 ? '' : 'es'} saved in this browser
+              </p>
+              <p className="mt-0.5 text-[12.5px] leading-snug text-subink">
+                These were made before you had an account, so they live in this browser only.
+                Import them to keep them with {user.email} and reach them from anywhere.
+              </p>
+              <div className="mt-2.5 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={importStrays}
+                  disabled={busy}
+                  className="rounded-full bg-accent px-3.5 py-1.5 text-[12.5px] font-medium text-white disabled:opacity-60"
+                >
+                  {busy ? 'Importing…' : `Import ${strays.length === 1 ? 'it' : 'them'}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStrays([])}
+                  className="rounded-full px-3 py-1.5 text-[12.5px] text-subink hover:bg-hover hover:text-ink"
+                >
+                  Not now
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Until the library has actually loaded, say nothing about it: an empty
+              state here would claim you have no canvases before anyone has looked. */}
+          {loading ? (
+            <div className="mt-6 rounded-2xl border border-dashed border-line2 bg-surface px-6 py-14 text-center">
+              <p className="text-[13px] text-subink">Loading your canvases…</p>
+            </div>
+          ) : (
+            <>
           {tab === 'mine' &&
             (ownedResults.length === 0 ? (
               searching ? (
@@ -612,15 +717,22 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
               })}
             </CardGrid>
           )}
+          </>
+          )}
         </main>
       </div>
 
       {sharing && (
         <ShareDialog
-          canvas={owned.find((c) => c.id === sharing.id) ?? sharing}
+          canvas={sharing}
           currentUser={user}
+          // The dialog hands back the canvas the server returned, so the list it
+          // shows is the stored truth rather than an optimistic guess.
+          onChanged={(updated) => {
+            setSharing(updated);
+            refresh();
+          }}
           onClose={() => setSharing(null)}
-          onChanged={refresh}
         />
       )}
 

@@ -1,5 +1,13 @@
+// Canvases used to live here, in this browser, before the app had a server. Now
+// that accounts are real, this module has two remaining jobs: hold the canvases a
+// pre-account user already created until they import them, and remember which
+// canvas was last open (a per-device UI preference, not account data).
 import { readJSON, writeJSON } from './storage';
 import { normalizeEmail } from './auth';
+// The title rule lives in its own module because the server enforces it too.
+import { DEFAULT_TITLE, uniqueTitle } from './titles';
+
+export { DEFAULT_TITLE, uniqueTitle };
 
 const CANVASES_KEY = 'lacuna:canvases:v1';
 const LAST_OPEN_KEY = 'lacuna:lastOpen:v1';
@@ -28,30 +36,6 @@ export function canvasesSharedWith(email) {
 
 export function getCanvas(id) {
   return all().find((c) => c.id === id) ?? null;
-}
-
-export const DEFAULT_TITLE = 'Untitled canvas';
-
-// Two canvases called "Untitled canvas" are indistinguishable in the library, and
-// the library is how you find your work. So a colliding title gets a counter:
-// the second is "Untitled canvas (1)", the third "(2)".
-//
-// A title that already ends in a counter is renumbered rather than stacked —
-// duplicating "Notes (2)" gives "Notes (3)", not "Notes (2) (1)". Comparison is
-// case-insensitive: "notes" and "Notes" are the same name to a person reading a
-// list, whatever the string comparison says.
-const COUNTER = /\s\((\d+)\)$/;
-
-export function uniqueTitle(desired, taken) {
-  const wanted = String(desired ?? '').trim() || DEFAULT_TITLE;
-  const used = new Set((taken ?? []).map((t) => String(t ?? '').trim().toLowerCase()));
-  if (!used.has(wanted.toLowerCase())) return wanted;
-
-  const base = wanted.replace(COUNTER, '');
-  for (let n = 1; ; n++) {
-    const candidate = `${base} (${n})`;
-    if (!used.has(candidate.toLowerCase())) return candidate;
-  }
 }
 
 function titlesOwnedBy(owner, exceptId = null) {
@@ -144,4 +128,17 @@ export function unshareCanvas(id, email) {
   updateCanvas(id, {
     sharedWith: (canvas.sharedWith ?? []).filter((e) => e !== recipient),
   });
+}
+
+// Called once the local canvases have been uploaded to an account, so the import
+// offer doesn't reappear and create duplicates.
+export function clearLocalCanvases(email) {
+  const owner = normalizeEmail(email);
+  persist(all().filter((c) => c.ownerEmail !== owner));
+}
+
+// The last-opened pointer, unvalidated: whether that canvas still exists is the
+// server's answer to give, and it gives it as a 404 when the canvas is opened.
+export function restorableOpenCanvasId(email) {
+  return readJSON(LAST_OPEN_KEY, {})[normalizeEmail(email)] ?? null;
 }

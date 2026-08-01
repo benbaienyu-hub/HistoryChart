@@ -28,3 +28,6 @@ dist-ssr
 *.sln
 *.sw?
 test/fixtures/
+
+# Server data: real accounts and canvases live here. Never commit it.
+.data/

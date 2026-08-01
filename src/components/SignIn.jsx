@@ -1,27 +1,56 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { isValidEmail, listUsers, signIn } from '../lib/auth';
+import { isValidEmail } from '../lib/auth';
+import { logIn, register } from '../lib/api';
 import Logo from './Logo';
 import ThemeToggle from './ThemeToggle';
 
+const FIELD =
+  'w-full rounded-xl border border-line2 bg-panel px-3 py-2.5 text-[14px] text-ink placeholder:text-subink/60 focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15';
+
 export default function SignIn({ onSignedIn }) {
+  // Two modes rather than two screens: the fields are almost identical, and a
+  // separate page would mean losing what you had already typed to switch.
+  const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const recent = listUsers().slice(-3).reverse();
+  const [busy, setBusy] = useState(false);
 
-  function submit(e) {
+  const registering = mode === 'register';
+
+  async function submit(e) {
     e.preventDefault();
     if (!isValidEmail(email)) {
       setError('Enter a valid email address.');
       return;
     }
+    if (registering && password.length < 8) {
+      setError('Use at least 8 characters for your password.');
+      return;
+    }
     setError('');
-    onSignedIn(signIn({ email, name }));
+    setBusy(true);
+    try {
+      const user = registering
+        ? await register({ email, name, password })
+        : await logIn({ email, password });
+      onSignedIn(user);
+    } catch (problem) {
+      setError(problem.message);
+      // The server distinguishes "no account" from "wrong password" internally but
+      // deliberately answers the same for both; offering the switch is the useful
+      // response either way.
+      if (problem.status === 409) setMode('login');
+      if (problem.status === 401) setMode('login');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-canvas px-6">
+    <div className="relative flex min-h-screen items-center justify-center bg-canvas px-6 py-10">
       <div className="absolute right-5 top-5">
         <ThemeToggle />
       </div>
@@ -36,7 +65,9 @@ export default function SignIn({ onSignedIn }) {
           <h1 className="text-[26px] font-semibold tracking-tight text-ink">Lacuna</h1>
         </div>
         <p className="mt-1.5 text-center text-[13.5px] leading-snug text-subink">
-          Map what you know, then let AI fill the gaps.
+          {registering
+            ? 'Create an account to sync your canvases and share them.'
+            : 'Map what you know, then let AI fill the gaps.'}
         </p>
 
         <form onSubmit={submit} className="mt-7 space-y-3">
@@ -47,23 +78,44 @@ export default function SignIn({ onSignedIn }) {
             <input
               id="email"
               type="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full rounded-xl border border-line2 bg-panel px-3 py-2.5 text-[14px] text-ink placeholder:text-subink/60 focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15"
+              className={FIELD}
             />
           </div>
 
+          {registering && (
+            <div>
+              <label className="mb-1 block text-[12px] font-medium text-subink" htmlFor="name">
+                Display name <span className="font-normal text-subink/70">(optional)</span>
+              </label>
+              <input
+                id="name"
+                autoComplete="name"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Ada Lovelace"
+                className={FIELD}
+              />
+            </div>
+          )}
+
           <div>
-            <label className="mb-1 block text-[12px] font-medium text-subink" htmlFor="name">
-              Display name <span className="font-normal text-subink/70">(optional)</span>
+            <label className="mb-1 block text-[12px] font-medium text-subink" htmlFor="password">
+              Password
             </label>
             <input
-              id="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Ada Lovelace"
-              className="w-full rounded-xl border border-line2 bg-panel px-3 py-2.5 text-[14px] text-ink placeholder:text-subink/60 focus:border-accent/50 focus:outline-none focus:ring-2 focus:ring-accent/15"
+              id="password"
+              type="password"
+              // Tells a password manager whether to offer a saved one or generate
+              // a new one — the wrong value here is a real usability bug.
+              autoComplete={registering ? 'new-password' : 'current-password'}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={registering ? 'At least 8 characters' : '••••••••'}
+              className={FIELD}
             />
           </div>
 
@@ -71,43 +123,32 @@ export default function SignIn({ onSignedIn }) {
 
           <motion.button
             type="submit"
-            whileHover={{ scale: 1.01 }}
-            whileTap={{ scale: 0.985 }}
-            className="w-full rounded-xl bg-accent py-2.5 text-[14px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.35)]"
+            disabled={busy}
+            whileHover={{ scale: busy ? 1 : 1.01 }}
+            whileTap={{ scale: busy ? 1 : 0.985 }}
+            className="w-full rounded-xl bg-accent py-2.5 text-[14px] font-medium text-white shadow-[0_2px_10px_rgba(0,113,227,0.35)] disabled:opacity-60"
           >
-            Continue
+            {busy ? 'One moment…' : registering ? 'Create account' : 'Sign in'}
           </motion.button>
         </form>
 
-        {recent.length > 0 && (
-          <div className="mt-5">
-            <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-subink/80">
-              Recent on this device
-            </p>
-            <div className="space-y-1.5">
-              {recent.map((u) => (
-                <button
-                  key={u.email}
-                  type="button"
-                  onClick={() => onSignedIn(signIn({ email: u.email }))}
-                  className="flex w-full items-center gap-2.5 rounded-xl border border-line bg-sunken px-3 py-2 text-left hover:bg-hover"
-                >
-                  <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent/10 text-[12px] font-semibold text-accent">
-                    {u.name.charAt(0).toUpperCase()}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[13px] font-medium text-ink">{u.name}</span>
-                    <span className="block truncate text-[11.5px] text-subink">{u.email}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+        <p className="mt-4 text-center text-[12.5px] text-subink">
+          {registering ? 'Already have an account?' : 'No account yet?'}{' '}
+          <button
+            type="button"
+            onClick={() => {
+              setMode(registering ? 'login' : 'register');
+              setError('');
+            }}
+            className="font-medium text-accent hover:underline"
+          >
+            {registering ? 'Sign in' : 'Create one'}
+          </button>
+        </p>
 
         <p className="mt-6 border-t border-line pt-4 text-[11.5px] leading-snug text-subink/80">
-          Local profile only — no password, no server. Your canvases are stored in this
-          browser, so they aren’t synced across devices.
+          Your canvases are stored on the server this app is running on, so they follow
+          you between browsers and can be shared with other people by email.
         </p>
       </motion.div>
     </div>

@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { knowledgeApiPlugin } from './server/knowledgeRoutes.js'
+import { accountApiPlugin } from './server/api.js'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
@@ -14,7 +15,7 @@ export default defineConfig(({ mode }) => {
   Object.assign(process.env, loadEnv(mode, process.cwd(), 'OPENAI_'))
 
   return {
-    plugins: [react(), knowledgeApiPlugin()],
+    plugins: [react(), accountApiPlugin(), knowledgeApiPlugin()],
     test: {
       // jsdom because most of what's worth testing here talks to localStorage
       // or document.documentElement (the theme store).

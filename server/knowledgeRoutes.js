@@ -471,6 +471,18 @@ function send(res, status, payload) {
 }
 
 // Node-style (req, res) handler for POST /api/knowledge.
+// Exported so the dev-server plugin and the standalone server (server/index.mjs)
+// answer this identically — the client uses it to decide whether the AI features
+// are available at all.
+export function handleKnowledgeStatus(req, res) {
+  send(res, 200, {
+    configured: hasApiKey() || mockEnabled(),
+    model: mockEnabled() ? 'offline sample data' : readModel(),
+    provider: mockEnabled() ? 'offline' : (readBaseUrl() ?? 'openai'),
+    mock: mockEnabled(),
+  });
+}
+
 export async function handleKnowledgeRequest(req, res) {
   if (req.method !== 'POST') {
     send(res, 405, { error: 'Use POST' });
@@ -580,14 +592,7 @@ export function knowledgeApiPlugin() {
         }
       }
       server.middlewares.use('/api/knowledge', handleKnowledgeRequest);
-      server.middlewares.use('/api/knowledge-status', (req, res) => {
-        send(res, 200, {
-          configured: hasApiKey() || mockEnabled(),
-          model: mockEnabled() ? 'offline sample data' : readModel(),
-          provider: mockEnabled() ? 'offline' : (readBaseUrl() ?? 'openai'),
-          mock: mockEnabled(),
-        });
-      });
+      server.middlewares.use('/api/knowledge-status', handleKnowledgeStatus);
     },
   };
 }

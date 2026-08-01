@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "start": "node server/index.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "check-key": "node scripts/check-key.mjs",

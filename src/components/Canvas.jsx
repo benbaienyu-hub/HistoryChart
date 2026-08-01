@@ -9,7 +9,7 @@ import GraphLevelMenu from './GraphLevelMenu';
 import BlockDetail from './BlockDetail';
 import StudyMode from './StudyMode';
 import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
-import { getCanvas, updateCanvas } from '../lib/canvasStore';
+import { ApiError, fetchCanvas, saveCanvas } from '../lib/api';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
 import { descendantIds, withVisibility } from '../lib/graph';
@@ -102,9 +102,14 @@ function serialize({ nodes, edges }) {
   };
 }
 
-export default function Canvas({ user, canvasId, onExit }) {
-  const record = useMemo(() => getCanvas(canvasId), [canvasId]);
-  const isOwner = record?.ownerEmail === user.email;
+// The editor proper. It is handed an already-loaded canvas so all of its state can
+// still be initialised synchronously — the loading lives in the wrapper below.
+function CanvasEditor({ user, record, onExit }) {
+  const canvasId = record.id;
+  const isOwner = record.role === 'owner';
+  // A 'view' grant can study a canvas but not change it, so nothing is persisted.
+  const canEdit = record.role === 'owner' || record.role === 'edit';
+  const [saveError, setSaveError] = useState(null);
 
   // Stable dispatchers: node.data callbacks are captured once at node-creation
   // time, so each wrapper forwards to whatever logic is current in the ref,
@@ -135,8 +140,9 @@ export default function Canvas({ user, canvasId, onExit }) {
   const [searchValue, setSearchValue] = useState('');
   const [isFilling, setIsFilling] = useState(false);
   const [showShare, setShowShare] = useState(false);
-  // Bumping this re-renders so the dialog re-reads the canvas's share list.
-  const [, setShareVersion] = useState(0);
+  // The dialog edits the grant list, and hands back the canvas the server
+  // returned, so the list on screen is always what the server actually stored.
+  const [shared, setShared] = useState(record);
   const [pendingRelation, setPendingRelation] = useState(null);
   const [editingRelation, setEditingRelation] = useState(null);
   const [studying, setStudying] = useState(false);
@@ -361,43 +367,79 @@ export default function Canvas({ user, canvasId, onExit }) {
     );
   }, [addingChildId, setNodes]);
 
-  // Persist graph edits back to the stored canvas, debounced: writing on every
-  // keystroke means re-serializing the entire graph and a synchronous
-  // localStorage write per character, which a large canvas feels.
+  // Persist graph edits to the server, debounced: a request per keystroke would
+  // be both slow and rude to the server, and the whole graph goes in each PUT.
   const saveTimer = useRef(null);
-  const flushSave = useCallback(() => {
-    if (saveTimer.current) {
-      clearTimeout(saveTimer.current);
-      saveTimer.current = null;
-    }
-    if (!record) return;
-    updateCanvas(canvasId, serialize(liveRef.current));
-  }, [canvasId, record]);
+  // Whether this page has changes the server hasn't been told about yet.
+  //
+  // Without this, leaving or reloading a canvas writes whatever the page happens
+  // to be holding — even when nothing was touched. On a canvas shared with someone
+  // else that is destructive: a tab left open on an old version silently overwrites
+  // the other person's edits the moment it closes. A save must be caused by an
+  // edit, not by a page ending.
+  const dirty = useRef(false);
+  const seenFirstRender = useRef(false);
+
+  const flushSave = useCallback(
+    (options) => {
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      if (!canEdit || !dirty.current) return;
+      dirty.current = false;
+      return saveCanvas(canvasId, serialize(liveRef.current), options)
+        .then(() => setSaveError(null))
+        .catch((problem) => {
+          // Still unsaved, so the next flush must try again.
+          dirty.current = true;
+          // Silence here would be the worst outcome: the user keeps typing into a
+          // canvas that is no longer being saved anywhere.
+          setSaveError(
+            problem instanceof ApiError && problem.status === 401
+              ? 'You have been signed out — open the app again to keep your changes.'
+              : problem.message
+          );
+        });
+    },
+    [canvasId, canEdit]
+  );
 
   useEffect(() => {
-    if (!record) return;
+    if (!canEdit) return;
+    // The first run is the graph arriving from the server, which is by definition
+    // already saved.
+    if (!seenFirstRender.current) {
+      seenFirstRender.current = true;
+      return;
+    }
+    dirty.current = true;
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(flushSave, SAVE_DEBOUNCE_MS);
-  }, [nodes, edges, record, flushSave]);
+  }, [nodes, edges, canEdit, flushSave]);
 
   // A debounce must never lose the tail of someone's typing, so force a write
   // whenever the canvas is about to stop being watched: leaving for Home
   // (unmount), hiding the tab, or closing it.
   useEffect(() => {
-    const flush = () => flushSave();
+    // `keepalive` lets the request outlive the page: an ordinary fetch started
+    // during pagehide is cancelled when the document goes away, which would lose
+    // the last few seconds of typing.
+    const flush = () => flushSave({ keepalive: true });
     window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', flush);
     return () => {
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', flush);
-      flushSave();
+      flushSave({ keepalive: true });
     };
   }, [flushSave]);
 
   useEffect(() => {
-    if (!record) return;
-    updateCanvas(canvasId, { title });
-  }, [title, canvasId, record]);
+    if (!canEdit) return;
+    if (title === record.title) return;
+    saveCanvas(canvasId, { title }).catch(() => {});
+  }, [title, canvasId, canEdit, record.title]);
 
   // Cmd/Ctrl+Z undo, Shift+Cmd/Ctrl+Z redo — but leave text fields alone so
   // the browser's own text undo keeps working while typing.
@@ -767,26 +809,26 @@ export default function Canvas({ user, canvasId, onExit }) {
   }
 
   function handleStudyFinish({ correct, total }) {
-    updateCanvas(canvasId, { lastScore: { correct, total, at: Date.now() } });
-  }
-
-  if (!record) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-canvas">
-        <p className="text-[14px] text-ink">This canvas no longer exists.</p>
-        <button
-          type="button"
-          onClick={onExit}
-          className="rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white"
-        >
-          Back to home
-        </button>
-      </div>
-    );
+    if (!canEdit) return;
+    saveCanvas(canvasId, { lastScore: { correct, total, at: Date.now() } }).catch(() => {});
   }
 
   return (
     <div ref={wrapperRef} className="relative h-screen w-screen overflow-hidden bg-canvas">
+      {(saveError || !canEdit) && (
+        <div className="absolute inset-x-0 top-[57px] z-20 px-4 py-2">
+          <p
+            className={`mx-auto max-w-2xl rounded-xl px-3 py-2 text-center text-[12.5px] ${
+              saveError
+                ? 'border border-danger/30 bg-danger-bg text-danger'
+                : 'border border-line2 bg-sunken text-subink'
+            }`}
+          >
+            {saveError ?? 'View only — this canvas was shared with you to read, not to edit.'}
+          </p>
+        </div>
+      )}
+
       <div className="absolute inset-x-0 top-0 z-10 flex items-center gap-3 border-b border-line bg-surface px-4 py-3 backdrop-blur-xl">
         <button
           type="button"
@@ -1049,10 +1091,10 @@ export default function Canvas({ user, canvasId, onExit }) {
 
       {showShare && (
         <ShareDialog
-          canvas={getCanvas(canvasId) ?? record}
+          canvas={shared}
           currentUser={user}
           onClose={() => setShowShare(false)}
-          onChanged={() => setShareVersion((v) => v + 1)}
+          onChanged={setShared}
         />
       )}
 
@@ -1096,4 +1138,55 @@ export default function Canvas({ user, canvasId, onExit }) {
       )}
     </div>
   );
+}
+
+
+// Loads the canvas, then hands it to the editor. Splitting these apart keeps the
+// editor's state initialisation synchronous — it can read record.nodes directly
+// instead of every piece of state needing a "not loaded yet" case.
+export default function Canvas({ user, canvasId, onExit, onMissing }) {
+  const [record, setRecord] = useState(null);
+  const [problem, setProblem] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRecord(null);
+    setProblem(null);
+    fetchCanvas(canvasId)
+      .then((canvas) => {
+        if (!cancelled) setRecord(canvas);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        // A canvas that has been deleted or un-shared answers 404. That is not an
+        // error worth a screen — just go back to the library.
+        if (error instanceof ApiError && error.status === 404) onMissing?.();
+        else setProblem(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canvasId, onMissing]);
+
+  if (problem) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-canvas px-6 text-center">
+        <p className="text-[14px] text-ink">Couldn’t open this canvas.</p>
+        <p className="max-w-sm text-[13px] leading-snug text-subink">{problem}</p>
+        <button
+          type="button"
+          onClick={onExit}
+          className="mt-2 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white"
+        >
+          Back to home
+        </button>
+      </div>
+    );
+  }
+
+  if (!record) return <div className="min-h-screen bg-canvas" />;
+
+  // Keyed on the id so switching canvases remounts rather than trying to
+  // reconcile one graph's state onto another's.
+  return <CanvasEditor key={record.id} user={user} record={record} onExit={onExit} />;
 }
