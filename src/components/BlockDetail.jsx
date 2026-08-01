@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { CATEGORIES, categoryColor, categoryLabel } from '../lib/categories';
+import { hasImageFiles, imagesFromClipboard, imagesFromDataTransfer, sortImageFiles } from '../lib/imageFiles';
+import { AddImageButton } from './BlockImages';
 
 // The expanded view of one block, at roughly half the screen. It edits the same
 // fields through the same handlers as the block itself — there is no separate
@@ -8,10 +10,28 @@ import { CATEGORIES, categoryColor, categoryLabel } from '../lib/categories';
 //
 // It renders outside the React Flow viewport on purpose: inside, it would inherit
 // the canvas transform and be scaled by the zoom level and clipped by the pane.
-export default function BlockDetail({ node, onClose, onNotesChange, onLabelChange, onFieldChange }) {
+export default function BlockDetail({
+  node,
+  onClose,
+  onNotesChange,
+  onLabelChange,
+  onFieldChange,
+  onAddImages,
+  onRemoveImage,
+}) {
   const notesRef = useRef(null);
   const { id } = node;
-  const { label, notes, date, category, unsure, aiFilled, aiCorrection } = node.data;
+  const {
+    label,
+    notes,
+    date,
+    category,
+    unsure,
+    aiFilled,
+    aiCorrection,
+    images = [],
+    uploadingImages = 0,
+  } = node.data;
 
   useEffect(() => {
     notesRef.current?.focus();
@@ -97,6 +117,16 @@ export default function BlockDetail({ node, onClose, onNotesChange, onLabelChang
               >
                 {unsure ? '? Flagged as unsure' : 'Mark as unsure'}
               </button>
+
+              {onAddImages && (
+                <AddImageButton
+                  onFiles={(files) => onAddImages(id, sortImageFiles(files))}
+                  title="Add an image"
+                  className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1 text-[12px] text-subink hover:bg-hover hover:text-ink"
+                >
+                  <span>＋ Image</span>
+                </AddImageButton>
+              )}
             </div>
           </div>
 
@@ -123,13 +153,70 @@ export default function BlockDetail({ node, onClose, onNotesChange, onLabelChang
           </p>
         )}
 
-        <textarea
-          ref={notesRef}
-          value={notes}
-          onChange={(e) => onNotesChange(id, e.target.value)}
-          placeholder="Write everything you know about this…"
-          className="min-h-0 flex-1 resize-none bg-transparent px-6 py-5 text-[14.5px] leading-relaxed text-ink/90 placeholder:text-subink/60 focus:outline-none"
-        />
+        {/* One scrolling column: the notes grow to fit, and the pictures sit
+            underneath them rather than competing for the same space. */}
+        <div
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+          onDragOver={(e) => {
+            if (hasImageFiles(e.dataTransfer)) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            if (!hasImageFiles(e.dataTransfer) || !onAddImages) return;
+            e.preventDefault();
+            onAddImages(id, imagesFromDataTransfer(e.dataTransfer));
+          }}
+        >
+          <textarea
+            ref={notesRef}
+            value={notes}
+            onChange={(e) => onNotesChange(id, e.target.value)}
+            onPaste={(e) => {
+              if (!onAddImages) return;
+              const found = imagesFromClipboard(e.clipboardData);
+              if (found.accepted.length === 0 && found.rejected.length === 0) return;
+              e.preventDefault();
+              onAddImages(id, found);
+            }}
+            placeholder="Write everything you know about this…"
+            // flex-1 with a floor: fills the panel when there are no pictures,
+            // and keeps a decent writing area when there are.
+            className="min-h-[240px] w-full flex-1 resize-none bg-transparent px-6 py-5 text-[14.5px] leading-relaxed text-ink/90 placeholder:text-subink/60 focus:outline-none"
+          />
+
+          {(images.length > 0 || uploadingImages > 0) && (
+            <div className="grid grid-cols-2 gap-3 px-6 pb-5">
+              {images.map((image) => (
+                <figure key={image.id} className="group/img relative">
+                  {/* Full shape here, unlike the cropped strip on the block —
+                      this is where you actually read a diagram. */}
+                  <img
+                    src={image.url}
+                    alt={image.name}
+                    className="w-full rounded-xl border border-line bg-sunken object-contain"
+                  />
+                  {onRemoveImage && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveImage(id, image.id)}
+                      aria-label={`Remove ${image.name}`}
+                      className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-[13px] leading-none text-white opacity-0 transition-opacity group-hover/img:opacity-100 hover:bg-danger"
+                    >
+                      ×
+                    </button>
+                  )}
+                  <figcaption className="mt-1 truncate text-[11px] text-subink">
+                    {image.name}
+                  </figcaption>
+                </figure>
+              ))}
+              {uploadingImages > 0 && (
+                <div className="flex h-32 items-center justify-center rounded-xl border border-dashed border-line2 bg-sunken text-[12px] text-subink">
+                  Uploading {uploadingImages} image{uploadingImages === 1 ? '' : 's'}…
+                </div>
+              )}
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center justify-between gap-3 border-t border-line px-6 py-2.5">
           <span className="text-[11.5px] text-subink">
@@ -137,6 +224,8 @@ export default function BlockDetail({ node, onClose, onNotesChange, onLabelChang
           </span>
           <span className="text-[11.5px] tabular-nums text-subink/70">
             {notes.trim() ? `${notes.trim().split(/\s+/).length} words` : 'No notes yet'}
+            {images.length > 0 &&
+              ` · ${images.length} image${images.length === 1 ? '' : 's'}`}
           </span>
         </div>
       </motion.div>

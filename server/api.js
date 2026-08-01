@@ -8,6 +8,9 @@ import {
   handleDelete,
   handleGet,
   handleList,
+  handleImageDelete,
+  handleImageGet,
+  handleImageUpload,
   handleShare,
   handleUnshare,
   handleUpdate,
@@ -29,6 +32,10 @@ const ROUTES = [
   { method: 'DELETE', path: '/api/canvases/:id', handler: handleDelete, auth: true },
   { method: 'POST', path: '/api/canvases/:id/share', handler: handleShare, auth: true },
   { method: 'POST', path: '/api/canvases/:id/unshare', handler: handleUnshare, auth: true },
+
+  { method: 'POST', path: '/api/canvases/:id/images', handler: handleImageUpload, auth: true },
+  { method: 'GET', path: '/api/images/:id', handler: handleImageGet, auth: true },
+  { method: 'DELETE', path: '/api/images/:id', handler: handleImageDelete, auth: true },
 ];
 
 export function isApiPath(pathname) {

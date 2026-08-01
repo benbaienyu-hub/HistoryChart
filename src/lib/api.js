@@ -98,3 +98,37 @@ export function unshareCanvas(id, email) {
     (r) => r.canvas
   );
 }
+
+// --- images ----------------------------------------------------------------
+
+// Sent as a raw body with the file's own content-type. The server stores the
+// bytes and returns a URL; the canvas keeps only that URL, so a picture is never
+// re-uploaded on every save the way an inlined data URL would be.
+export async function uploadImage(canvasId, file) {
+  let response;
+  try {
+    response = await fetch(`/api/canvases/${encodeURIComponent(canvasId)}/images`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: {
+        'content-type': file.type || 'application/octet-stream',
+        // Header rather than the body, and ASCII-only: a filename with an emoji
+        // in it would otherwise make the header invalid and fail the upload.
+        'x-image-name': encodeURIComponent(file.name ?? 'image'),
+      },
+      body: file,
+    });
+  } catch (cause) {
+    throw new ApiError('Could not reach the server to upload that image.', 0, { cause });
+  }
+
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new ApiError(payload.error ?? `Upload failed (${response.status})`, response.status);
+  }
+  return payload.image;
+}
+
+export function deleteImage(id) {
+  return request('DELETE', `/api/images/${encodeURIComponent(id)}`);
+}

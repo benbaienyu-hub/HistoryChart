@@ -144,9 +144,10 @@ A plan that overstates the product is worthless, so plainly:
 
 **Working today.** Infinite canvas with branching blocks, labelled relationships
 between them, four generation depths, AI gap-filling and fact-correction, per-point
-study grading with a summary of what you missed, library search across titles and
-note content, unique canvas titles, undo/redo, light and dark themes, starter example
-canvases, and an offline demo mode that needs no API key. 343 automated tests.
+study grading with a summary of what you missed, images in blocks (paste, drag, or
+pick — shown with the answer when studying), library search across titles and note
+content, unique canvas titles, undo/redo, light and dark themes, starter example
+canvases, and an offline demo mode that needs no API key. 408 automated tests.
 Provider-agnostic AI: OpenAI, Groq, or a local model.
 
 **Accounts and sharing are real now.** A password-backed account (scrypt with a

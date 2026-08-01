@@ -33,6 +33,24 @@ export async function readJsonBody(req) {
   }
 }
 
+// Images arrive as a raw body rather than multipart: one file per request needs no
+// boundary parsing, and a multipart parser is a dependency and an attack surface
+// for something a content-type header already tells us.
+export async function readBinaryBody(req, limit) {
+  const chunks = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += chunk.length;
+    if (size > limit) {
+      const error = new Error('That image is too large.');
+      error.status = 413;
+      throw error;
+    }
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks);
+}
+
 export function parseCookies(header) {
   const out = {};
   for (const part of String(header ?? '').split(';')) {

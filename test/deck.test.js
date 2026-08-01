@@ -82,6 +82,7 @@ describe('buildDeck', () => {
       label: 'a',
       notes: 'n',
       points: ['n'],
+      images: [],
       date: '1914',
       category: 'event',
       unsure: true,
@@ -253,6 +254,30 @@ describe('sessionTally', () => {
     const tally = sessionTally([{ id: 'a', recalled: 3, total: 3, missedPoints: [] }]);
     expect(tally.pct).toBe(100);
     expect(tally.missed).toEqual([]);
+  });
+});
+
+describe('images on a card', () => {
+  it('carries a block’s images through to the card', () => {
+    const withImage = node('a', null, {
+      notes: 'some notes',
+      images: [{ id: 'i1', url: '/api/images/i1', name: 'diagram.png' }],
+    });
+    expect(buildDeck([withImage])[0].images).toEqual([
+      { id: 'i1', url: '/api/images/i1', name: 'diagram.png' },
+    ]);
+  });
+
+  it('defaults to none, so an old canvas has no undefined to render', () => {
+    expect(buildDeck([node('a', null, { notes: 'x' })])[0].images).toEqual([]);
+  });
+
+  it('an image alone does not make a card — the notes are still the answer', () => {
+    const pictureOnly = node('a', null, {
+      notes: '',
+      images: [{ id: 'i1', url: '/api/images/i1', name: 'x.png' }],
+    });
+    expect(buildDeck([pictureOnly])).toEqual([]);
   });
 });
 

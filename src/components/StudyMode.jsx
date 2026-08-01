@@ -306,6 +306,21 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                 <AnimatePresence mode="wait">
                   {revealed ? (
                     <motion.div key="answer" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}>
+                      {/* Wrapping rather than scrolling sideways: a second image
+                          half off the edge of the card looks broken, and you
+                          would not know to scroll for it. */}
+                      {card.images?.length > 0 && (
+                        <div className="mb-3 flex flex-wrap justify-center gap-2">
+                          {card.images.map((image) => (
+                            <img
+                              key={image.id}
+                              src={image.url}
+                              alt={image.name}
+                              className="max-h-40 max-w-full rounded-lg border border-line"
+                            />
+                          ))}
+                        </div>
+                      )}
                       <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-wide text-subink/80">
                         Tick what you had
                       </p>

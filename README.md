@@ -13,6 +13,33 @@ ones in your own notes is the point of the app.
 > the `historychart:` prefix to `lacuna:`; `src/lib/migrate.js` moves existing
 > data across on first load, so an upgrade keeps your canvases.
 
+## Images in a block
+
+Three ways in, and paste is the one that matters:
+
+- **Paste** a screenshot straight into a block's notes field. It never has to become a file on disk first, which is how most diagrams actually arrive.
+- **Drag** an image file onto a block — it highlights to show where it will land.
+- **Click the image button** in the block's top-right corner, or **＋ Image** in the expanded view.
+
+A block shows its pictures as a cropped strip above the notes so a row of mixed
+portrait and landscape images stays tidy; the expanded view shows them whole,
+which is where you actually read a diagram. Hover any image to remove it.
+
+In **study mode** images appear with the *answer*, never the prompt — a diagram on
+the front would give away the thing you are trying to recall. A picture on its own
+still doesn't make a card: the notes are the answer, so a block with an image and
+no notes is not something you can be quizzed on.
+
+**Uploads are files on the server, not data URLs.** A base64 image inside `nodes`
+would be re-sent on every debounced save, re-written into the data file each time,
+and would pass the request size limit after two or three pictures. So the bytes go
+to `.data/uploads/` and the canvas keeps only `{ id, url, name }`.
+
+- **PNG, JPEG, WebP, and GIF only, 8MB each.** SVG is refused deliberately: it can carry script, and while that can't run inside an `<img>`, it would run for anyone who opened the file's URL directly — a stored-XSS hole handed over by an "images" feature. Images are also served with `nosniff` and a `default-src 'none'` CSP.
+- **Reading an image needs permission on its canvas**, not just its URL. Un-share a canvas and the pictures go with it. An unguessable link is not an access check.
+- Adding one requires edit access; viewers can look but not attach.
+- Deleting a canvas deletes its images, so nothing is left on disk that nobody will ever ask for.
+
 ## Accounts and sharing
 
 Sign-in is real: an account with a password, a session in an httpOnly cookie, and
@@ -421,7 +448,10 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
-| `src/lib/api.js` | Client side of the account API |
+| `src/lib/api.js` | Client side of the account API, including uploads |
+| `src/lib/imageFiles.js` | Getting images out of a picker, a drag, or a paste |
+| `src/components/BlockImages.jsx` | The image strip and the add-image button |
+| `server/images.js` | Upload storage, format rules, and cleanup |
 | `server/api.js` | The API router, mounted by both the dev and the production server |
 | `server/accounts.js` | Password hashing, sessions, sign-in throttling |
 | `server/canvasRoutes.js` | Canvas CRUD, share grants, permission checks |

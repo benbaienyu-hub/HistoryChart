@@ -9,7 +9,7 @@ import GraphLevelMenu from './GraphLevelMenu';
 import BlockDetail from './BlockDetail';
 import StudyMode from './StudyMode';
 import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
-import { ApiError, fetchCanvas, saveCanvas } from '../lib/api';
+import { ApiError, deleteImage, fetchCanvas, saveCanvas, uploadImage } from '../lib/api';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
 import { descendantIds, withVisibility } from '../lib/graph';
@@ -89,6 +89,9 @@ function serialize({ nodes, edges }) {
         aiFilled: n.data.aiFilled,
         aiCorrection: n.data.aiCorrection,
         aiSuggested: n.data.aiSuggested,
+        // Just the ids and URLs — the bytes live on the server. `uploadingImages`
+        // is deliberately absent: it is in-flight UI state, not part of the canvas.
+        images: n.data.images ?? [],
         collapsed: Boolean(n.data.collapsed),
       },
     })),
@@ -124,6 +127,8 @@ function CanvasEditor({ user, record, onExit }) {
     onCancelChild: (id) => handlersRef.current.onCancelChild(id),
     onToggleCollapse: (id) => handlersRef.current.onToggleCollapse(id),
     onExpand: (id) => handlersRef.current.onExpand(id),
+    onAddImages: (id, files) => handlersRef.current.onAddImages(id, files),
+    onRemoveImage: (id, imageId) => handlersRef.current.onRemoveImage(id, imageId),
     onDelete: (id) => handlersRef.current.onDelete(id),
   }).current;
 
@@ -289,6 +294,64 @@ function CanvasEditor({ user, record, onExit }) {
       setNodes((prev) =>
         prev.map((n) => (n.id === id ? { ...n, data: { ...n.data, ...patch } } : n))
       );
+    },
+    async onAddImages(id, { accepted, rejected }) {
+      if (rejected.length > 0) setSaveError(rejected.join(' '));
+      if (accepted.length === 0) return;
+
+      // A counter rather than a boolean: dropping four files at once should show
+      // four placeholders and clear them one at a time.
+      const bump = (delta) =>
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === id
+              ? {
+                  ...n,
+                  data: {
+                    ...n.data,
+                    uploadingImages: Math.max(0, (n.data.uploadingImages ?? 0) + delta),
+                  },
+                }
+              : n
+          )
+        );
+
+      bump(accepted.length);
+      for (const file of accepted) {
+        try {
+          const image = await uploadImage(canvasId, file);
+          // One history entry per image, so an accidental paste is one undo away.
+          pushHistory(null);
+          setNodes((prev) =>
+            prev.map((n) =>
+              n.id === id
+                ? { ...n, data: { ...n.data, images: [...(n.data.images ?? []), image] } }
+                : n
+            )
+          );
+        } catch (problem) {
+          setSaveError(problem.message);
+        } finally {
+          bump(-1);
+        }
+      }
+    },
+    async onRemoveImage(id, imageId) {
+      pushHistory(null);
+      // Removed from the block first: the picture disappearing immediately is
+      // what the click asked for, and a failed delete only leaves an unreferenced
+      // file on the server rather than a broken block.
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                data: { ...n.data, images: (n.data.images ?? []).filter((i) => i.id !== imageId) },
+              }
+            : n
+        )
+      );
+      await deleteImage(imageId).catch(() => {});
     },
     onStartAddChild(id) {
       setAddingChildId((prev) => (prev === id ? null : id));
@@ -1125,6 +1188,8 @@ function CanvasEditor({ user, record, onExit }) {
           onNotesChange={stable.onNotesChange}
           onLabelChange={stable.onLabelChange}
           onFieldChange={stable.onFieldChange}
+          onAddImages={canEdit ? stable.onAddImages : undefined}
+          onRemoveImage={canEdit ? stable.onRemoveImage : undefined}
         />
       )}
 

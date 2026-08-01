@@ -2,6 +2,13 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Handle, Position } from 'reactflow';
 import { AnimatePresence, motion } from 'framer-motion';
 import { CATEGORIES, categoryColor, categoryLabel } from '../lib/categories';
+import {
+  hasImageFiles,
+  imagesFromClipboard,
+  imagesFromDataTransfer,
+  sortImageFiles,
+} from '../lib/imageFiles';
+import { AddImageButton, ImageStrip } from './BlockImages';
 
 // Top/bottom handles only anchor the parent→child tree edges, so they ignore
 // pointer events (they used to swallow clicks meant for the "+" button).
@@ -33,6 +40,10 @@ function KnowledgeBlock({ data, id }) {
     childCount = 0,
     hiddenCount = 0,
     isAddingChild,
+    images = [],
+    uploadingImages = 0,
+    onAddImages,
+    onRemoveImage,
     onNotesChange,
     onLabelChange,
     onFieldChange,
@@ -52,6 +63,9 @@ function KnowledgeBlock({ data, id }) {
   const labelInputRef = useRef(null);
 
   const [showPalette, setShowPalette] = useState(false);
+  // Highlighted while a file is being dragged over the block, so it is obvious
+  // where the picture is about to land.
+  const [dropping, setDropping] = useState(false);
 
   useEffect(() => {
     if (isAddingChild) childInputRef.current?.focus();
@@ -83,6 +97,23 @@ function KnowledgeBlock({ data, id }) {
     setEditingLabel(false);
   }
 
+  function handleDrop(e) {
+    if (!hasImageFiles(e.dataTransfer)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    setDropping(false);
+    onAddImages?.(id, imagesFromDataTransfer(e.dataTransfer));
+  }
+
+  // Paste is the one that matters most in practice: a screenshot goes from the
+  // clipboard into the right block without ever becoming a file on disk.
+  function handlePaste(e) {
+    const found = imagesFromClipboard(e.clipboardData);
+    if (found.accepted.length === 0 && found.rejected.length === 0) return;
+    e.preventDefault();
+    onAddImages?.(id, found);
+  }
+
   return (
     <motion.div
       initial={{ opacity: 0, scale: 0.55, y: 12 }}
@@ -92,7 +123,20 @@ function KnowledgeBlock({ data, id }) {
         aiSuggested
           ? 'border-dashed border-accent/40 bg-accent-soft/70'
           : 'border-line bg-surface'
-      } ${unsure ? 'ring-2 ring-warn-line' : ''}`}
+      } ${unsure ? 'ring-2 ring-warn-line' : ''} ${
+        dropping ? 'ring-2 ring-accent' : ''
+      }`}
+      onDragOver={(e) => {
+        if (!hasImageFiles(e.dataTransfer)) return;
+        e.preventDefault();
+        setDropping(true);
+      }}
+      onDragLeave={(e) => {
+        // Only when the pointer actually leaves the block: moving between its
+        // children fires dragleave too, which would flicker the highlight.
+        if (!e.currentTarget.contains(e.relatedTarget)) setDropping(false);
+      }}
+      onDrop={handleDrop}
     >
       {!isRoot && <Handle type="target" position={Position.Top} style={anchorStyle} />}
 
@@ -112,6 +156,10 @@ function KnowledgeBlock({ data, id }) {
       />
 
       <div className="nodrag absolute right-2 top-2.5 flex items-center gap-0.5">
+        <AddImageButton
+          onFiles={(files) => onAddImages?.(id, sortImageFiles(files))}
+          className="flex h-5 w-5 items-center justify-center rounded-full text-subink/40 hover:bg-hover hover:text-ink"
+        />
         <button
           type="button"
           onClick={() => onExpand(id)}
@@ -250,6 +298,13 @@ function KnowledgeBlock({ data, id }) {
         </div>
       </div>
 
+      <ImageStrip
+        images={images}
+        uploading={uploadingImages}
+        onOpen={() => onExpand(id)}
+        onRemove={onRemoveImage ? (imageId) => onRemoveImage(id, imageId) : undefined}
+      />
+
       {/* `nowheel` is React Flow's opt-out: without it the canvas swallows the
           wheel event to zoom, so a trackpad two-finger scroll over long notes
           zoomed the graph instead of scrolling the text, leaving the scrollbar as
@@ -258,6 +313,7 @@ function KnowledgeBlock({ data, id }) {
         value={notes}
         onChange={(e) => onNotesChange(id, e.target.value)}
         placeholder={loading ? 'Researching…' : 'Add notes…'}
+        onPaste={handlePaste}
         // Generated notes arrive as 2–4 dot points, most of which wrap, so four
         // rows put nearly every block behind a scroll on arrival.
         rows={6}

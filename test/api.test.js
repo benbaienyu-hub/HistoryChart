@@ -406,3 +406,146 @@ describe('the API surface itself', () => {
     expect(await res.text()).toBe('not an api path');
   });
 });
+
+// A one-pixel PNG, so the tests exercise real bytes rather than a string that
+// happens to be labelled image/png.
+const PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==',
+  'base64'
+);
+
+async function upload(person, canvasId, { type = 'image/png', body = PNG, name = 'pixel.png' } = {}) {
+  const res = await fetch(`${base}/api/canvases/${canvasId}/images`, {
+    method: 'POST',
+    headers: {
+      'content-type': type,
+      'x-image-name': encodeURIComponent(name),
+      ...(person.cookie ? { cookie: person.cookie } : {}),
+    },
+    body,
+  });
+  return { status: res.status, json: await res.json().catch(() => ({})) };
+}
+
+describe('images', () => {
+  it('uploads against a canvas and returns a URL that serves the bytes back', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', { title: 'With pictures' });
+
+    const uploaded = await upload(ben, json.canvas.id);
+    expect(uploaded.status).toBe(201);
+    expect(uploaded.json.image.url).toBe(`/api/images/${uploaded.json.image.id}`);
+    expect(uploaded.json.image.name).toBe('pixel.png');
+
+    const fetched = await fetch(`${base}${uploaded.json.image.url}`, {
+      headers: { cookie: ben.cookie },
+    });
+    expect(fetched.status).toBe(200);
+    expect(fetched.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await fetched.arrayBuffer()).equals(PNG)).toBe(true);
+  });
+
+  it('serves images with the headers that stop them being treated as documents', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const uploaded = await upload(ben, json.canvas.id);
+    const fetched = await fetch(`${base}${uploaded.json.image.url}`, {
+      headers: { cookie: ben.cookie },
+    });
+    expect(fetched.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(fetched.headers.get('content-security-policy')).toContain("default-src 'none'");
+  });
+
+  it('refuses SVG, which can carry script', async () => {
+    // The reason images are restricted to raster formats: an SVG opened directly
+    // would execute whatever is inside it, from our own origin.
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const refused = await upload(ben, json.canvas.id, {
+      type: 'image/svg+xml',
+      body: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'),
+      name: 'evil.svg',
+    });
+    expect(refused.status).toBe(415);
+    expect(refused.json.error).toMatch(/PNG/);
+  });
+
+  it('refuses a non-image and an empty file', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    expect((await upload(ben, json.canvas.id, { type: 'application/pdf' })).status).toBe(415);
+    expect((await upload(ben, json.canvas.id, { body: Buffer.alloc(0) })).status).toBe(400);
+  });
+
+  it('lets an editor add images but not a viewer', async () => {
+    const ben = await signedUp('ben@example.com');
+    const ada = await signedUp('ada@example.com');
+    const cara = await signedUp('cara@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const id = json.canvas.id;
+    await ben.call('POST', `/api/canvases/${id}/share`, { email: 'ada@example.com', role: 'edit' });
+    await ben.call('POST', `/api/canvases/${id}/share`, { email: 'cara@example.com', role: 'view' });
+
+    expect((await upload(ada, id)).status).toBe(201);
+    expect((await upload(cara, id)).status).toBe(403);
+  });
+
+  it('will not upload to someone else’s canvas at all', async () => {
+    const ben = await signedUp('ben@example.com');
+    const stranger = await signedUp('stranger@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    expect((await upload(stranger, json.canvas.id)).status).toBe(404);
+  });
+
+  it('an image is only readable by people who can reach its canvas', async () => {
+    // An unguessable URL is not a permission check: someone removed from a canvas
+    // must lose its pictures too.
+    const ben = await signedUp('ben@example.com');
+    const ada = await signedUp('ada@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const id = json.canvas.id;
+    const uploaded = await upload(ben, id);
+
+    const before = await fetch(`${base}${uploaded.json.image.url}`, { headers: { cookie: ada.cookie } });
+    expect(before.status).toBe(404);
+
+    await ben.call('POST', `/api/canvases/${id}/share`, { email: 'ada@example.com' });
+    const during = await fetch(`${base}${uploaded.json.image.url}`, { headers: { cookie: ada.cookie } });
+    expect(during.status).toBe(200);
+
+    await ben.call('POST', `/api/canvases/${id}/unshare`, { email: 'ada@example.com' });
+    const after = await fetch(`${base}${uploaded.json.image.url}`, { headers: { cookie: ada.cookie } });
+    expect(after.status).toBe(404);
+  });
+
+  it('needs a session even to read an image', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const uploaded = await upload(ben, json.canvas.id);
+    expect((await fetch(`${base}${uploaded.json.image.url}`)).status).toBe(401);
+  });
+
+  it('deletes an image on request', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const uploaded = await upload(ben, json.canvas.id);
+    expect((await ben.call('DELETE', uploaded.json.image.url)).status).toBe(200);
+    expect((await fetch(`${base}${uploaded.json.image.url}`, { headers: { cookie: ben.cookie } })).status).toBe(404);
+  });
+
+  it('takes the images with the canvas when it is deleted', async () => {
+    // Otherwise every deleted canvas leaves files nobody will ever ask for again.
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const uploaded = await upload(ben, json.canvas.id);
+    await ben.call('DELETE', `/api/canvases/${json.canvas.id}`);
+    expect((await fetch(`${base}${uploaded.json.image.url}`, { headers: { cookie: ben.cookie } })).status).toBe(404);
+  });
+
+  it('keeps a filename with characters a header cannot carry', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { json } = await ben.call('POST', '/api/canvases', {});
+    const uploaded = await upload(ben, json.canvas.id, { name: 'diagram — draft 🇪🇹.png' });
+    expect(uploaded.json.image.name).toBe('diagram — draft 🇪🇹.png');
+  });
+});

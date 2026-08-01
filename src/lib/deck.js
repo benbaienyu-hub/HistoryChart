@@ -91,6 +91,9 @@ export function buildDeck(nodes, { flaggedOnly = false, seed = 1, restrictTo = n
     date: n.data.date,
     category: n.data.category,
     unsure: n.data.unsure,
+    // Shown with the answer, not the prompt: a diagram on the front would give
+    // away what you are trying to recall.
+    images: n.data.images ?? [],
   }));
 
   const ordered = shuffle(cards, seed);

@@ -9,7 +9,17 @@ import { randomUUID } from 'node:crypto';
 import { findUserById, normalizeEmail, isValidEmail } from './accounts.js';
 import { mutate, readDb } from './store.js';
 import { uniqueTitle } from '../src/lib/titles.js';
-import { readJsonBody, send } from './http.js';
+import { readBinaryBody, readJsonBody, send } from './http.js';
+import {
+  ALLOWED_TYPES,
+  MAX_IMAGE_BYTES,
+  deleteImagesForCanvas,
+  findImage,
+  imageTypeProblem,
+  readImageBytes,
+  saveImage,
+  deleteImage as removeImage,
+} from './images.js';
 
 export const ROLES = ['edit', 'view'];
 
@@ -144,6 +154,9 @@ export function handleDelete(req, res, user, { id }) {
     db.canvases = db.canvases.filter((c) => c.id !== id);
     db.grants = db.grants.filter((g) => g.canvasId !== id);
   });
+  // Otherwise the pictures outlive the canvas that referenced them, and nothing
+  // will ever ask for them again.
+  deleteImagesForCanvas(id);
   return send(res, 200, {});
 }
 
@@ -207,3 +220,83 @@ export async function handleUnshare(req, res, user, { id }) {
   });
   return send(res, 200, { canvas: serialize(byId(id), user) });
 }
+
+// --- images ----------------------------------------------------------------
+
+// The client percent-encodes the filename, because a header may only carry ASCII
+// and people do put emoji in filenames.
+function decodeName(raw) {
+  try {
+    return decodeURIComponent(String(raw ?? ''));
+  } catch {
+    return String(raw ?? '');
+  }
+}
+
+// Uploaded against a canvas, so permission to add a picture is the same as
+// permission to edit the block it goes in.
+export async function handleImageUpload(req, res, user, { id }) {
+  const canvas = byId(id);
+  const role = accessFor(canvas, user);
+  if (!role) return send(res, 404, { error: 'Canvas not found.' });
+  if (role === 'view') {
+    return send(res, 403, { error: 'You have view-only access to this canvas.' });
+  }
+
+  const type = String(req.headers['content-type'] ?? '').split(';')[0].trim();
+  const problem = imageTypeProblem(type);
+  if (problem) return send(res, 415, { error: problem });
+
+  const bytes = await readBinaryBody(req, MAX_IMAGE_BYTES);
+  if (bytes.length === 0) return send(res, 400, { error: 'That file was empty.' });
+
+  const image = saveImage({
+    canvasId: id,
+    ownerId: user.id,
+    type,
+    name: decodeName(req.headers['x-image-name']),
+    bytes,
+  });
+  return send(res, 201, { image: { id: image.id, name: image.name, url: `/api/images/${image.id}` } });
+}
+
+// Serving is gated the same way the canvas is: an unguessable URL is not the same
+// as a permission check, and someone removed from a canvas should lose its pictures
+// too.
+export function handleImageGet(req, res, user, { id }) {
+  const image = findImage(id);
+  if (!image) return send(res, 404, { error: 'Image not found.' });
+  if (!accessFor(byId(image.canvasId), user)) {
+    return send(res, 404, { error: 'Image not found.' });
+  }
+
+  let bytes;
+  try {
+    bytes = readImageBytes(image);
+  } catch {
+    return send(res, 404, { error: 'That image is no longer on disk.' });
+  }
+
+  res.statusCode = 200;
+  res.setHeader('content-type', image.type);
+  // nosniff so the browser cannot be talked into treating the bytes as something
+  // executable, and a locked-down CSP in case it is opened as a document rather
+  // than embedded.
+  res.setHeader('x-content-type-options', 'nosniff');
+  res.setHeader('content-security-policy', "default-src 'none'; sandbox");
+  res.setHeader('content-disposition', 'inline');
+  // Immutable: the id is unique per upload, so the bytes behind it never change.
+  res.setHeader('cache-control', 'private, max-age=31536000, immutable');
+  res.end(bytes);
+}
+
+export function handleImageDelete(req, res, user, { id }) {
+  const image = findImage(id);
+  if (!image) return send(res, 404, { error: 'Image not found.' });
+  const role = accessFor(byId(image.canvasId), user);
+  if (!role || role === 'view') return send(res, 404, { error: 'Image not found.' });
+  removeImage(image);
+  return send(res, 200, {});
+}
+
+export { ALLOWED_TYPES };
