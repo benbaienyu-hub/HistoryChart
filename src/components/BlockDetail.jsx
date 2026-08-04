@@ -18,6 +18,7 @@ export default function BlockDetail({
   onFieldChange,
   onAddImages,
   onRemoveImage,
+  onCaptionChange,
 }) {
   const notesRef = useRef(null);
   const { id } = node;
@@ -178,9 +179,14 @@ export default function BlockDetail({
               onAddImages(id, found);
             }}
             placeholder="Write everything you know about this…"
-            // flex-1 with a floor: fills the panel when there are no pictures,
-            // and keeps a decent writing area when there are.
-            className="min-h-[240px] w-full flex-1 resize-none bg-transparent px-6 py-5 text-[14.5px] leading-relaxed text-ink/90 placeholder:text-subink/60 focus:outline-none"
+            // Grows to fill the panel only when there is nothing below it.
+            // Stretching while images wait underneath would open a band of empty
+            // space between the notes and the pictures.
+            className={`w-full resize-none bg-transparent px-6 py-5 text-[14.5px] leading-relaxed text-ink/90 placeholder:text-subink/60 focus:outline-none ${
+              images.length > 0 || uploadingImages > 0
+                ? 'min-h-[160px] shrink-0'
+                : 'min-h-[240px] flex-1'
+            }`}
           />
 
           {(images.length > 0 || uploadingImages > 0) && (
@@ -191,21 +197,37 @@ export default function BlockDetail({
                       this is where you actually read a diagram. */}
                   <img
                     src={image.url}
-                    alt={image.name}
+                    alt={image.caption || image.name}
                     className="w-full rounded-xl border border-line bg-sunken object-contain"
                   />
                   {onRemoveImage && (
                     <button
                       type="button"
                       onClick={() => onRemoveImage(id, image.id)}
-                      aria-label={`Remove ${image.name}`}
+                      aria-label={`Remove ${image.caption || image.name}`}
                       className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-full bg-black/55 text-[13px] leading-none text-white opacity-0 transition-opacity group-hover/img:opacity-100 hover:bg-danger"
                     >
                       ×
                     </button>
                   )}
-                  <figcaption className="mt-1 truncate text-[11px] text-subink">
-                    {image.name}
+                  <figcaption className="mt-1.5">
+                    {onCaptionChange ? (
+                      // The caption is where the picture gets said out loud — what
+                      // it shows and why it is here. The filename becomes the
+                      // placeholder's neighbour rather than the caption itself,
+                      // since "Screenshot 2026-08-01 at 14.22.13.png" says nothing.
+                      <input
+                        value={image.caption ?? ''}
+                        onChange={(e) => onCaptionChange(id, image.id, e.target.value)}
+                        placeholder="Add a caption…"
+                        aria-label={`Caption for ${image.name}`}
+                        className="w-full rounded-md bg-transparent px-1 py-0.5 text-[12px] text-ink/90 placeholder:text-subink/60 hover:bg-hover focus:bg-sunken focus:outline-none focus:ring-1 focus:ring-accent/30"
+                      />
+                    ) : (
+                      <p className="truncate px-1 text-[12px] text-subink">
+                        {image.caption || image.name}
+                      </p>
+                    )}
                   </figcaption>
                 </figure>
               ))}

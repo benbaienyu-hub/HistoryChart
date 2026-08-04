@@ -25,6 +25,15 @@ A block shows its pictures as a cropped strip above the notes so a row of mixed
 portrait and landscape images stays tidy; the expanded view shows them whole,
 which is where you actually read a diagram. Hover any image to remove it.
 
+**Captions** go under each image in the expanded view — click and type, it saves as
+you go. The block shows the caption under the thumbnail, truncated, with the full
+text on hover. A caption is worth more than it looks:
+
+- It becomes the image's **alt text**, because a caption describes a picture and `Screenshot 2026-08-01 at 14.22.13.png` does not.
+- It is **canvas data, not upload metadata** — the same file could reasonably be captioned differently in two places, so the caption belongs to the block that shows it.
+- Typing one is **a single undo step**, coalesced per image like notes and titles.
+- It is **not** a study point. Cards are graded on the points in your notes, and quietly turning captions into extra points would change scores under you. A caption labels the picture; it doesn't get marked.
+
 In **study mode** images appear with the *answer*, never the prompt — a diagram on
 the front would give away the thing you are trying to recall. A picture on its own
 still doesn't make a card: the notes are the answer, so a block with an image and
@@ -33,7 +42,7 @@ no notes is not something you can be quizzed on.
 **Uploads are files on the server, not data URLs.** A base64 image inside `nodes`
 would be re-sent on every debounced save, re-written into the data file each time,
 and would pass the request size limit after two or three pictures. So the bytes go
-to `.data/uploads/` and the canvas keeps only `{ id, url, name }`.
+to `.data/uploads/` and the canvas keeps only `{ id, url, name, caption }`.
 
 - **PNG, JPEG, WebP, and GIF only, 8MB each.** SVG is refused deliberately: it can carry script, and while that can't run inside an `<img>`, it would run for anyone who opened the file's URL directly — a stored-XSS hole handed over by an "images" feature. Images are also served with `nosniff` and a `default-src 'none'` CSP.
 - **Reading an image needs permission on its canvas**, not just its URL. Un-share a canvas and the pictures go with it. An unguessable link is not an access check.
@@ -450,6 +459,7 @@ hardcode white or black and both themes stay in sync.
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
 | `src/lib/api.js` | Client side of the account API, including uploads |
 | `src/lib/imageFiles.js` | Getting images out of a picker, a drag, or a paste |
+| `src/lib/canvasShape.js` | What a canvas looks like when stored — the persistence allowlist |
 | `src/components/BlockImages.jsx` | The image strip and the add-image button |
 | `server/images.js` | Upload storage, format rules, and cleanup |
 | `server/api.js` | The API router, mounted by both the dev and the production server |

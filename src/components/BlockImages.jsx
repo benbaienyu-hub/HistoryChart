@@ -60,18 +60,22 @@ export function ImageStrip({ images = [], onOpen, onRemove, uploading = 0 }) {
   if (images.length === 0 && uploading === 0) return null;
 
   return (
-    <div className="mt-2 flex gap-1.5">
+    <div className="mt-2 flex items-start gap-1.5">
       {images.map((image) => (
         <div key={image.id} className="group/img relative min-w-0 flex-1">
           <button
             type="button"
             onClick={onOpen}
-            title={image.name}
+            // The caption is the better tooltip when there is one — the filename
+            // is an implementation detail of wherever the picture came from.
+            title={image.caption || image.name}
             className="block w-full cursor-zoom-in overflow-hidden rounded-lg border border-line bg-sunken"
           >
             <img
               src={image.url}
-              alt={image.name}
+              // A caption describes the picture; a filename usually doesn't. So it
+              // makes the better alt text when it exists.
+              alt={image.caption || image.name}
               // Height rather than width, so one image fills the block and four
               // sit in a row without any of them collapsing.
               className="h-[84px] w-full object-cover"
@@ -79,6 +83,11 @@ export function ImageStrip({ images = [], onOpen, onRemove, uploading = 0 }) {
               draggable={false}
             />
           </button>
+          {image.caption && (
+            <p className="mt-1 truncate text-[10.5px] leading-snug text-subink" title={image.caption}>
+              {image.caption}
+            </p>
+          )}
           {onRemove && (
             <button
               type="button"

@@ -272,6 +272,14 @@ describe('images on a card', () => {
     expect(buildDeck([node('a', null, { notes: 'x' })])[0].images).toEqual([]);
   });
 
+  it('carries a caption, since that is what a picture says on a card', () => {
+    const captioned = node('a', null, {
+      notes: 'some notes',
+      images: [{ id: 'i1', url: '/u', name: 'map.png', caption: 'The northern plateau' }],
+    });
+    expect(buildDeck([captioned])[0].images[0].caption).toBe('The northern plateau');
+  });
+
   it('an image alone does not make a card — the notes are still the answer', () => {
     const pictureOnly = node('a', null, {
       notes: '',

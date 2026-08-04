@@ -310,14 +310,20 @@ export default function StudyMode({ nodes, canvasTitle, onExit, onFinish }) {
                           half off the edge of the card looks broken, and you
                           would not know to scroll for it. */}
                       {card.images?.length > 0 && (
-                        <div className="mb-3 flex flex-wrap justify-center gap-2">
+                        <div className="mb-3 flex flex-wrap items-start justify-center gap-2">
                           {card.images.map((image) => (
-                            <img
-                              key={image.id}
-                              src={image.url}
-                              alt={image.name}
-                              className="max-h-40 max-w-full rounded-lg border border-line"
-                            />
+                            <figure key={image.id} className="max-w-full">
+                              <img
+                                src={image.url}
+                                alt={image.caption || image.name}
+                                className="max-h-40 max-w-full rounded-lg border border-line"
+                              />
+                              {image.caption && (
+                                <figcaption className="mt-1 max-w-[240px] text-center text-[11px] leading-snug text-subink">
+                                  {image.caption}
+                                </figcaption>
+                              )}
+                            </figure>
                           ))}
                         </div>
                       )}

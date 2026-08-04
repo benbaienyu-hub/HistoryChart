@@ -10,6 +10,7 @@ import BlockDetail from './BlockDetail';
 import StudyMode from './StudyMode';
 import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
 import { ApiError, deleteImage, fetchCanvas, saveCanvas, uploadImage } from '../lib/api';
+import { serializeCanvas as serialize } from '../lib/canvasShape';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
 import { descendantIds, withVisibility } from '../lib/graph';
@@ -70,41 +71,6 @@ function makeEdge(sourceId, targetId) {
 // How much graph "Make a graph" generates is chosen per-run from the depth menu
 // — see src/lib/graphLevels.js for the counts and what each level costs.
 
-// Strip React callbacks and transient UI flags so a graph can be stored in
-// localStorage or pushed onto the undo stack.
-function serialize({ nodes, edges }) {
-  return {
-    nodes: nodes.map((n) => ({
-      id: n.id,
-      type: n.type,
-      position: n.position,
-      data: {
-        label: n.data.label,
-        notes: n.data.notes,
-        date: n.data.date ?? '',
-        category: n.data.category ?? 'none',
-        unsure: Boolean(n.data.unsure),
-        parentId: n.data.parentId,
-        isRoot: n.data.isRoot,
-        aiFilled: n.data.aiFilled,
-        aiCorrection: n.data.aiCorrection,
-        aiSuggested: n.data.aiSuggested,
-        // Just the ids and URLs — the bytes live on the server. `uploadingImages`
-        // is deliberately absent: it is in-flight UI state, not part of the canvas.
-        images: n.data.images ?? [],
-        collapsed: Boolean(n.data.collapsed),
-      },
-    })),
-    edges: edges.map((e) => ({
-      id: e.id,
-      source: e.source,
-      target: e.target,
-      label: e.label ?? undefined,
-      data: e.data ?? undefined,
-    })),
-  };
-}
-
 // The editor proper. It is handed an already-loaded canvas so all of its state can
 // still be initialised synchronously — the loading lives in the wrapper below.
 function CanvasEditor({ user, record, onExit }) {
@@ -129,6 +95,8 @@ function CanvasEditor({ user, record, onExit }) {
     onExpand: (id) => handlersRef.current.onExpand(id),
     onAddImages: (id, files) => handlersRef.current.onAddImages(id, files),
     onRemoveImage: (id, imageId) => handlersRef.current.onRemoveImage(id, imageId),
+    onCaptionChange: (id, imageId, text) =>
+      handlersRef.current.onCaptionChange(id, imageId, text),
     onDelete: (id) => handlersRef.current.onDelete(id),
   }).current;
 
@@ -335,6 +303,26 @@ function CanvasEditor({ user, record, onExit }) {
           bump(-1);
         }
       }
+    },
+    onCaptionChange(id, imageId, text) {
+      // Coalesced per image, like notes and titles: typing a caption should be one
+      // undo step, not one per character.
+      pushHistory(`caption:${imageId}`);
+      setNodes((prev) =>
+        prev.map((n) =>
+          n.id === id
+            ? {
+                ...n,
+                data: {
+                  ...n.data,
+                  images: (n.data.images ?? []).map((image) =>
+                    image.id === imageId ? { ...image, caption: text } : image
+                  ),
+                },
+              }
+            : n
+        )
+      );
     },
     async onRemoveImage(id, imageId) {
       pushHistory(null);
@@ -1190,6 +1178,7 @@ function CanvasEditor({ user, record, onExit }) {
           onFieldChange={stable.onFieldChange}
           onAddImages={canEdit ? stable.onAddImages : undefined}
           onRemoveImage={canEdit ? stable.onRemoveImage : undefined}
+          onCaptionChange={canEdit ? stable.onCaptionChange : undefined}
         />
       )}
 
