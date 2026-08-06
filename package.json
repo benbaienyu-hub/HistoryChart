@@ -1,5 +1,5 @@
 {
-  "name": "historychart",
+  "name": "lacuna",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,10 +7,17 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server/index.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check-key": "node scripts/check-key.mjs",
+    "logo": "node scripts/build-logo.mjs",
+    "demo": "OPENAI_MOCK=1 vite"
   },
   "dependencies": {
     "framer-motion": "^12.43.0",
+    "openai": "^7.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "reactflow": "^11.11.4"
@@ -20,9 +27,11 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "jsdom": "^30.0.1",
     "oxlint": "^1.71.0",
     "postcss": "^8.5.25",
     "tailwindcss": "^4.3.3",
-    "vite": "^8.1.1"
+    "vite": "^8.1.1",
+    "vitest": "^4.1.10"
   }
 }
