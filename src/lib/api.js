@@ -132,3 +132,23 @@ export async function uploadImage(canvasId, file) {
 export function deleteImage(id) {
   return request('DELETE', `/api/images/${encodeURIComponent(id)}`);
 }
+
+// --- spaced repetition -----------------------------------------------------
+
+// Every schedule this user has, grouped by canvas, so the library can show due
+// counts in one request rather than one per canvas.
+export function fetchAllReviews() {
+  return request('GET', '/api/reviews').then((r) => r.reviews ?? {});
+}
+
+export function fetchReviews(canvasId) {
+  return request('GET', `/api/canvases/${encodeURIComponent(canvasId)}/reviews`).then(
+    (r) => r.reviews ?? {}
+  );
+}
+
+// The server decides the next interval from these grades — the client does not
+// get a vote, which keeps the algorithm in one place.
+export function submitReviews(canvasId, grades) {
+  return request('POST', `/api/canvases/${encodeURIComponent(canvasId)}/reviews`, { grades });
+}

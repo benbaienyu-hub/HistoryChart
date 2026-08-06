@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { canvasesOwnedBy as localCanvases, clearLocalCanvases } from '../lib/canvasStore';
-import { createCanvas, deleteCanvas, fetchCanvases, saveCanvas } from '../lib/api';
+import { createCanvas, deleteCanvas, fetchAllReviews, fetchCanvases, saveCanvas } from '../lib/api';
 import { categoryColor } from '../lib/categories';
 import {
   highlightSegments,
@@ -10,6 +10,7 @@ import {
   searchTemplates,
 } from '../lib/canvasSearch';
 import { buildTemplateGraph, listTemplates } from '../lib/templates';
+import { countDue } from '../lib/review';
 import Logo from './Logo';
 import ShareDialog from './ShareDialog';
 import ThemeToggle from './ThemeToggle';
@@ -157,7 +158,7 @@ function formatUpdated(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-function CanvasCard({ canvas, index, onOpen, actions, terms = [], matchedBlocks = [] }) {
+function CanvasCard({ canvas, index, onOpen, actions, terms = [], matchedBlocks = [], due = 0 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(canvas.title);
 
@@ -216,8 +217,14 @@ function CanvasCard({ canvas, index, onOpen, actions, terms = [], matchedBlocks 
         </p>
       )}
 
+      {due > 0 && (
+        <p className="mt-1 text-[11.5px] font-medium text-accent">
+          {due} card{due === 1 ? '' : 's'} due
+        </p>
+      )}
+
       {canvas.lastScore && (
-        <p className="mt-1 text-[11.5px] text-accent">
+        <p className="mt-1 text-[11.5px] text-subink">
           Last studied {canvas.lastScore.correct}/{canvas.lastScore.total} points
         </p>
       )}
@@ -338,16 +345,30 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
   // than moved silently — it is the user's data and they should choose.
   const [strays, setStrays] = useState(() => localCanvases(user.email));
 
+  const [reviews, setReviews] = useState({});
+
   const refresh = useCallback(
     () =>
-      fetchCanvases()
-        .then((next) => {
+      Promise.all([fetchCanvases(), fetchAllReviews().catch(() => ({}))])
+        .then(([next, schedules]) => {
           setLibrary(next);
+          setReviews(schedules);
           setLoadError(null);
         })
         .catch((problem) => setLoadError(problem.message))
         .finally(() => setLoading(false)),
     []
+  );
+
+  // How many cards on a canvas are ready for review. Only blocks with notes can be
+  // cards, so an un-written canvas is never "due".
+  const dueFor = useCallback(
+    (canvas) =>
+      countDue(
+        (canvas.nodes ?? []).filter((n) => n.data?.notes?.trim()),
+        reviews[canvas.id] ?? {}
+      ),
+    [reviews]
   );
 
   useEffect(() => {
@@ -642,6 +663,7 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
                   <CanvasCard
                     key={canvas.id}
                     canvas={canvas}
+                    due={dueFor(canvas)}
                     index={i}
                     onOpen={onOpenCanvas}
                     actions={ownedActions}
@@ -668,6 +690,7 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
                   <CanvasCard
                     key={canvas.id}
                     canvas={canvas}
+                    due={dueFor(canvas)}
                     index={i}
                     onOpen={onOpenCanvas}
                     actions={{ readOnly: true }}

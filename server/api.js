@@ -15,6 +15,11 @@ import {
   handleUnshare,
   handleUpdate,
 } from './canvasRoutes.js';
+import {
+  handleCanvasReviews,
+  handleReviewList,
+  handleSubmitReviews,
+} from './reviewRoutes.js';
 import { matchPath, send } from './http.js';
 
 // `auth: true` means the route needs a signed-in user, and gets it as the third
@@ -36,6 +41,10 @@ const ROUTES = [
   { method: 'POST', path: '/api/canvases/:id/images', handler: handleImageUpload, auth: true },
   { method: 'GET', path: '/api/images/:id', handler: handleImageGet, auth: true },
   { method: 'DELETE', path: '/api/images/:id', handler: handleImageDelete, auth: true },
+
+  { method: 'GET', path: '/api/reviews', handler: handleReviewList, auth: true },
+  { method: 'GET', path: '/api/canvases/:id/reviews', handler: handleCanvasReviews, auth: true },
+  { method: 'POST', path: '/api/canvases/:id/reviews', handler: handleSubmitReviews, auth: true },
 ];
 
 export function isApiPath(pathname) {

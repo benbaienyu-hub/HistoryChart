@@ -387,6 +387,64 @@ it goes into a printed deck.
 
 ## Studying
 
+Click **Study** and you choose two things before seeing a card, because both
+genuinely change the session:
+
+**What** — *Due now* (what the schedule says is ready, plus anything never seen),
+*Everything*, or *Flagged only*.
+
+**How** — *Self-check* (recall it in your head, reveal, tick what you had), or
+*Type the answer*.
+
+### Spaced repetition
+
+Recall decays, and the moment just before you'd forget something is when reviewing
+it does the most good. So each card carries an interval that grows while you keep
+getting it right and collapses when you don't, and the library tells you what's due
+rather than making you decide what to revise.
+
+The scheduler is SM-2 in outline — an interval multiplied by a per-card ease that
+drifts up on easy answers and down on hard ones — with one deliberate difference.
+SM-2 asks the learner to rate each card 0–5, which is a guess about a guess. This
+app already produces something better: **the fraction of a card's points you
+actually recalled**. That fraction becomes the grade, so the schedule moves on
+evidence rather than on self-assessment.
+
+- Miss a card and it comes back the same day, its streak reset, so it climbs the early intervals again instead of resuming a month-long gap. That's how you avoid forgetting the same thing twice.
+- Getting one point of three counts as **not recalled**. It's the one boundary worth stating out loud: you missed two thirds of it.
+- Intervals land on **days, not on the minute**. Studying at 21:00 and again at 20:00 the next evening counts as a day later — on a strict 24-hour clock it wouldn't, and cards would drift an hour later every session until they fell off the end of the day.
+- Intervals cap at a year, and ease stays between 1.3 and 2.8, outside which cards either never leave or vanish for months after two good answers.
+- **Schedules are per person, not per canvas.** A canvas shared with a friend has one set of notes and as many schedules as it has readers — what they've drilled and what you've never seen are different facts about different people. Studying a read-only canvas still builds your own schedule, because it changes nothing about theirs.
+
+Due counts show on each library card and on the Study button. The end-of-session
+screen says when things come back — "1 tomorrow, 2 later" — because a schedule you
+can't see is just a black box telling you what to do.
+
+### Type the answer
+
+Ticking is generous: shown the answer, you will reliably believe you knew it.
+Typing first makes that harder. You write what you remember in one go, and it
+marks itself against the card's points.
+
+Matching can't be literal — nobody reproduces a sentence word for word, and
+demanding it would be the exact mistake per-point grading exists to avoid. So each
+point is reduced to the words carrying its meaning (content words and every
+number), and a point counts as recalled when **two thirds of them** appear in what
+you wrote, in any order, with any phrasing around them. Plurals fold to singulars
+and accents are ignored, so `highlands` matches `highland` and `Adwa` doesn't need
+its diacritics.
+
+One rule earns its keep: **miss a date and the point is refused**, however much of
+the wording you got. "The battle of Adwa defeated an Italian invasion" scores 0.67
+against "Battle of Adwa, 1896, defeated an Italian invasion" — above the threshold
+— and is still marked as missed, because the year is the fact being tested.
+
+The result is a *suggestion*: it pre-fills the same checklist self-check mode uses,
+shows which words it found and which it missed, and you can overrule it. No keyword
+rule will ever understand a paraphrase, so the final say stays with the person.
+
+
+
 Any block with notes is a card, with the title as the prompt. Cards are graded
 **per point, not word for word** — nobody recalls a paragraph of notes verbatim,
 and being marked wrong for failing to is not a useful signal.
@@ -454,6 +512,10 @@ hardcode white or black and both themes stay in sync.
 | `src/components/BlockDetail.jsx` | The half-screen expanded view of one block |
 | `src/lib/layout.js` | Tidy-tree layout over the `parentId` forest |
 | `src/lib/deck.js` | Flashcard selection, point splitting, and per-point grading |
+| `src/lib/review.js` | The scheduler — intervals, ease, what's due |
+| `src/lib/recall.js` | Matching typed free recall against a card's points |
+| `src/components/StudySetup.jsx` | The what-and-how screen before a session |
+| `server/reviewRoutes.js` | Per-user review state; the server owns the scheduling |
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
 | `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
 | `server/knowledgeRoutes.js` | Server side — the only place the API key is read |

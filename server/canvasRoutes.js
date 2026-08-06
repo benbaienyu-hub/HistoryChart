@@ -155,8 +155,11 @@ export function handleDelete(req, res, user, { id }) {
     db.grants = db.grants.filter((g) => g.canvasId !== id);
   });
   // Otherwise the pictures outlive the canvas that referenced them, and nothing
-  // will ever ask for them again.
+  // will ever ask for them again. Same for everyone's review schedules.
   deleteImagesForCanvas(id);
+  mutate((db) => {
+    db.reviews = (db.reviews ?? []).filter((r) => r.canvasId !== id);
+  });
   return send(res, 200, {});
 }
 

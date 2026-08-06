@@ -144,10 +144,11 @@ A plan that overstates the product is worthless, so plainly:
 
 **Working today.** Infinite canvas with branching blocks, labelled relationships
 between them, four generation depths, AI gap-filling and fact-correction, per-point
-study grading with a summary of what you missed, images in blocks (paste, drag, or
-pick — shown with the answer when studying), library search across titles and note
-content, unique canvas titles, undo/redo, light and dark themes, starter example
-canvases, and an offline demo mode that needs no API key. 408 automated tests.
+study grading with a summary of what you missed, spaced-repetition scheduling and a
+type-the-answer mode that marks itself, images in blocks (paste, drag, or pick —
+shown with the answer when studying), library search across titles and note content,
+unique canvas titles, undo/redo, light and dark themes, starter example canvases, and
+an offline demo mode that needs no API key. 479 automated tests.
 Provider-agnostic AI: OpenAI, Groq, or a local model.
 
 **Accounts and sharing are real now.** A password-backed account (scrypt with a
@@ -166,7 +167,7 @@ scale and is one module to swap.
 | Phase | Work | Why it's in this order |
 | --- | --- | --- |
 | **1. Make it sellable** | ~~Accounts, a server, sync~~ **(built)**; still needed: per-user AI quotas, password reset, Stripe | Every revenue line depends on this. The hard half — real identity and server-side canvases — is done and tested |
-| **2. Make it stick** | Spaced-repetition scheduling driven by the per-point grades already recorded; Anki and PDF export; shareable public canvases; mobile polish | Retention and the growth loop. Scheduling is the feature that turns a study tool into a habit |
+| **2. Make it stick** | ~~Spaced-repetition scheduling; typed free recall~~ **(built)**; still needed: Anki and PDF export, shareable public canvases, mobile polish | Retention and the growth loop. Scheduling is what turns a study tool into a habit, and it now runs on the per-point grades rather than a self-rating |
 | **3. Make it institutional** | Teacher dashboard: assign a canvas, see which specific points a class is missing | The per-point data is the product no competitor has. A class-wide gap report is worth more to a teacher than any number of scores |
 
 ## 9. Illustrative projections

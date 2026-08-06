@@ -549,3 +549,137 @@ describe('images', () => {
     expect(uploaded.json.image.name).toBe('diagram — draft 🇪🇹.png');
   });
 });
+
+describe('review schedules', () => {
+  async function canvasWithCard(person, title = 'Ethiopia') {
+    const { json } = await person.call('POST', '/api/canvases', {
+      title,
+      nodes: [{ id: 'b1', data: { label: 'Adwa', notes: 'Italy lost in 1896.' } }],
+    });
+    return json.canvas.id;
+  }
+
+  it('starts with nothing scheduled', async () => {
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    expect((await ben.call('GET', `/api/canvases/${id}/reviews`)).json.reviews).toEqual({});
+    expect((await ben.call('GET', '/api/reviews')).json.reviews).toEqual({});
+  });
+
+  it('schedules a card forward when the session went well', async () => {
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    const { status, json } = await ben.call('POST', `/api/canvases/${id}/reviews`, {
+      grades: [{ blockId: 'b1', recalled: 2, total: 2 }],
+    });
+    expect(status).toBe(200);
+    expect(json.reviews.b1.interval).toBeGreaterThan(0);
+    expect(json.reviews.b1.dueAt).toBeGreaterThan(Date.now());
+    expect(json.reviews.b1.reps).toBe(1);
+  });
+
+  it('brings a missed card straight back', async () => {
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    const { json } = await ben.call('POST', `/api/canvases/${id}/reviews`, {
+      grades: [{ blockId: 'b1', recalled: 0, total: 2 }],
+    });
+    expect(json.reviews.b1.interval).toBe(0);
+    expect(json.reviews.b1.dueAt).toBeLessThanOrEqual(Date.now());
+  });
+
+  it('accumulates across sessions rather than starting over', async () => {
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    const good = { grades: [{ blockId: 'b1', recalled: 2, total: 2 }] };
+    const first = await ben.call('POST', `/api/canvases/${id}/reviews`, good);
+    const second = await ben.call('POST', `/api/canvases/${id}/reviews`, good);
+    expect(second.json.reviews.b1.reps).toBe(2);
+    expect(second.json.reviews.b1.interval).toBeGreaterThan(first.json.reviews.b1.interval);
+  });
+
+  it('keeps one row per block rather than a row per session', async () => {
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    const grades = { grades: [{ blockId: 'b1', recalled: 1, total: 2 }] };
+    await ben.call('POST', `/api/canvases/${id}/reviews`, grades);
+    await ben.call('POST', `/api/canvases/${id}/reviews`, grades);
+    expect(Object.keys((await ben.call('GET', `/api/canvases/${id}/reviews`)).json.reviews)).toEqual(['b1']);
+  });
+
+  it('gives each person their own schedule for a shared canvas', async () => {
+    // The reason review rows are keyed by user: what Ada has drilled and what Ben
+    // has never seen are different facts about different people.
+    const ben = await signedUp('ben@example.com');
+    const ada = await signedUp('ada@example.com');
+    const id = await canvasWithCard(ben);
+    await ben.call('POST', `/api/canvases/${id}/share`, { email: 'ada@example.com' });
+
+    await ben.call('POST', `/api/canvases/${id}/reviews`, {
+      grades: [{ blockId: 'b1', recalled: 2, total: 2 }],
+    });
+
+    expect((await ben.call('GET', `/api/canvases/${id}/reviews`)).json.reviews.b1).toBeDefined();
+    expect((await ada.call('GET', `/api/canvases/${id}/reviews`)).json.reviews).toEqual({});
+  });
+
+  it('lets a view-only reader build their own schedule', async () => {
+    // Studying changes nothing about someone else's canvas, so read-only access is
+    // no reason to refuse it.
+    const ben = await signedUp('ben@example.com');
+    const cara = await signedUp('cara@example.com');
+    const id = await canvasWithCard(ben);
+    await ben.call('POST', `/api/canvases/${id}/share`, { email: 'cara@example.com', role: 'view' });
+
+    const { status } = await cara.call('POST', `/api/canvases/${id}/reviews`, {
+      grades: [{ blockId: 'b1', recalled: 1, total: 2 }],
+    });
+    expect(status).toBe(200);
+    expect((await cara.call('GET', `/api/canvases/${id}/reviews`)).json.reviews.b1).toBeDefined();
+  });
+
+  it('refuses a canvas the user cannot reach', async () => {
+    const ben = await signedUp('ben@example.com');
+    const stranger = await signedUp('stranger@example.com');
+    const id = await canvasWithCard(ben);
+    expect((await stranger.call('GET', `/api/canvases/${id}/reviews`)).status).toBe(404);
+    expect(
+      (await stranger.call('POST', `/api/canvases/${id}/reviews`, { grades: [] })).status
+    ).toBe(404);
+  });
+
+  it('needs a session', async () => {
+    expect((await client().call('GET', '/api/reviews')).status).toBe(401);
+  });
+
+  it('groups every schedule by canvas for the library', async () => {
+    const ben = await signedUp('ben@example.com');
+    const one = await canvasWithCard(ben, 'One');
+    const two = await canvasWithCard(ben, 'Two');
+    await ben.call('POST', `/api/canvases/${one}/reviews`, {
+      grades: [{ blockId: 'b1', recalled: 2, total: 2 }],
+    });
+    const all = (await ben.call('GET', '/api/reviews')).json.reviews;
+    expect(Object.keys(all)).toEqual([one]);
+    expect(all[two]).toBeUndefined();
+  });
+
+  it('ignores a grade with no block', async () => {
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    const { json } = await ben.call('POST', `/api/canvases/${id}/reviews`, {
+      grades: [{ recalled: 1, total: 2 }, { blockId: '', recalled: 1, total: 1 }],
+    });
+    expect(json.reviews).toEqual({});
+  });
+
+  it('takes the schedules with the canvas when it is deleted', async () => {
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    await ben.call('POST', `/api/canvases/${id}/reviews`, {
+      grades: [{ blockId: 'b1', recalled: 2, total: 2 }],
+    });
+    await ben.call('DELETE', `/api/canvases/${id}`);
+    expect((await ben.call('GET', '/api/reviews')).json.reviews).toEqual({});
+  });
+});

@@ -9,8 +9,17 @@ import GraphLevelMenu from './GraphLevelMenu';
 import BlockDetail from './BlockDetail';
 import StudyMode from './StudyMode';
 import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
-import { ApiError, deleteImage, fetchCanvas, saveCanvas, uploadImage } from '../lib/api';
+import {
+  ApiError,
+  deleteImage,
+  fetchCanvas,
+  fetchReviews,
+  saveCanvas,
+  submitReviews,
+  uploadImage,
+} from '../lib/api';
 import { serializeCanvas as serialize } from '../lib/canvasShape';
+import { countDue } from '../lib/review';
 import { categoryColor } from '../lib/categories';
 import { autoLayout } from '../lib/layout';
 import { descendantIds, withVisibility } from '../lib/graph';
@@ -79,6 +88,10 @@ function CanvasEditor({ user, record, onExit }) {
   // A 'view' grant can study a canvas but not change it, so nothing is persisted.
   const canEdit = record.role === 'owner' || record.role === 'edit';
   const [saveError, setSaveError] = useState(null);
+  // This user's schedule for this canvas, by block id. Fetched separately from the
+  // canvas because it is per-person: a shared canvas has one set of notes and as
+  // many schedules as it has readers.
+  const [reviews, setReviews] = useState({});
 
   // Stable dispatchers: node.data callbacks are captured once at node-creation
   // time, so each wrapper forwards to whatever logic is current in the ref,
@@ -143,6 +156,11 @@ function CanvasEditor({ user, record, onExit }) {
   // What React Flow actually renders: collapsed subtrees marked hidden, plus
   // per-node child/hidden counts for the collapse control.
   const visible = useMemo(() => withVisibility(nodes, edges), [nodes, edges]);
+  // Cards with notes that the schedule says are ready, plus any never studied.
+  const dueNow = useMemo(
+    () => countDue(nodes.filter((n) => n.data.notes?.trim()), reviews),
+    [nodes, reviews]
+  );
 
   const expandedNode = expandedId ? (nodes.find((n) => n.id === expandedId) ?? null) : null;
 
@@ -491,6 +509,20 @@ function CanvasEditor({ user, record, onExit }) {
     if (title === record.title) return;
     saveCanvas(canvasId, { title }).catch(() => {});
   }, [title, canvasId, canEdit, record.title]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchReviews(canvasId)
+      .then((found) => {
+        if (!cancelled) setReviews(found);
+      })
+      // A missing schedule is not worth an error: it just means nothing is
+      // scheduled yet, and every card reads as due.
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [canvasId]);
 
   // Cmd/Ctrl+Z undo, Shift+Cmd/Ctrl+Z redo — but leave text fields alone so
   // the browser's own text undo keeps working while typing.
@@ -859,9 +891,26 @@ function CanvasEditor({ user, record, onExit }) {
     refit();
   }
 
-  function handleStudyFinish({ correct, total }) {
-    if (!canEdit) return;
-    saveCanvas(canvasId, { lastScore: { correct, total, at: Date.now() } }).catch(() => {});
+  // Called with every card's grade when a session ends. Returns the new schedule
+  // so the summary can say when things come back.
+  async function handleStudyFinish(grades) {
+    const correct = grades.reduce((sum, g) => sum + g.recalled, 0);
+    const total = grades.reduce((sum, g) => sum + g.total, 0);
+    // The score is canvas data and needs edit rights; the schedule is personal and
+    // does not — studying a read-only canvas still builds your own schedule.
+    if (canEdit) {
+      saveCanvas(canvasId, { lastScore: { correct, total, at: Date.now() } }).catch(() => {});
+    }
+    try {
+      const result = await submitReviews(
+        canvasId,
+        grades.map((g) => ({ blockId: g.id, recalled: g.recalled, total: g.total }))
+      );
+      setReviews(result.reviews ?? {});
+      return result.updated ?? [];
+    } catch {
+      return null;
+    }
   }
 
   return (
@@ -1048,9 +1097,17 @@ function CanvasEditor({ user, record, onExit }) {
           type="button"
           onClick={() => setStudying(true)}
           disabled={nodes.length === 0}
+          title={dueNow > 0 ? `${dueNow} cards due for review` : 'Study this canvas'}
           className="shrink-0 rounded-full border border-line2 px-3 py-2 text-[13px] text-subink hover:bg-hover hover:text-ink disabled:opacity-40"
         >
           Study
+          {/* The count is the nudge. Without it the schedule exists but nothing
+              ever tells you to act on it. */}
+          {dueNow > 0 && (
+            <span className="ml-1.5 rounded-full bg-accent px-1.5 text-[11px] font-medium tabular-nums text-white">
+              {dueNow}
+            </span>
+          )}
         </button>
 
         <ThemeToggle />
@@ -1186,6 +1243,7 @@ function CanvasEditor({ user, record, onExit }) {
         <StudyMode
           nodes={nodes}
           canvasTitle={title}
+          reviews={reviews}
           onExit={() => setStudying(false)}
           onFinish={handleStudyFinish}
         />

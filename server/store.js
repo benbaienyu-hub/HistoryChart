@@ -15,7 +15,16 @@ import { fileURLToPath } from 'node:url';
 
 const DEFAULT_PATH = fileURLToPath(new URL('../.data/lacuna.json', import.meta.url));
 
-const EMPTY = { version: 1, users: [], sessions: [], canvases: [], grants: [] };
+const EMPTY = {
+  version: 1,
+  users: [],
+  sessions: [],
+  canvases: [],
+  grants: [],
+  images: [],
+  // Spaced-repetition state, one row per user per block — see reviewRoutes.js.
+  reviews: [],
+};
 
 let dataPath = process.env.LACUNA_DATA || DEFAULT_PATH;
 let cache = null;
