@@ -10,7 +10,7 @@
 // every local checkout. It does its work synchronously and returns promises, so it
 // satisfies the same interface as the Postgres one without pretending to be slow.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { withDefaults } from './document.js';
@@ -52,15 +52,62 @@ export function createFileStore(path) {
     async mutate(fn) {
       const db = load();
       const result = await fn(db);
-      mkdirSync(dirname(dataPath), { recursive: true });
-      const tmp = `${dataPath}.tmp`;
-      writeFileSync(tmp, JSON.stringify(db, null, 2));
-      renameSync(tmp, dataPath);
+      try {
+        mkdirSync(dirname(dataPath), { recursive: true });
+        const tmp = `${dataPath}.tmp`;
+        writeFileSync(tmp, JSON.stringify(db, null, 2));
+        renameSync(tmp, dataPath);
+      } catch (cause) {
+        throw unwritable(cause, dataPath);
+      }
       return result;
     },
 
     describe() {
       return `JSON file at ${dataPath}`;
     },
+
+    // Can this backend actually save? Read-only is not detectable from a read —
+    // reading a missing file looks exactly like a first run — so the only honest
+    // answer comes from trying.
+    async writable() {
+      try {
+        mkdirSync(dirname(dataPath), { recursive: true });
+        const probe = `${dataPath}.probe`;
+        writeFileSync(probe, '');
+        rmSync(probe, { force: true });
+        return { ok: true };
+      } catch (cause) {
+        return { ok: false, problem: unwritable(cause, dataPath).message };
+      }
+    },
   };
+}
+
+// Codes that mean "this location cannot be written to", as opposed to a bug.
+// EROFS is what a serverless platform's filesystem gives.
+const UNWRITABLE_CODES = new Set(['EROFS', 'EACCES', 'EPERM']);
+
+// Being unable to save is almost always one thing: the app fell back to a file
+// because no database was configured, and it is running somewhere with no disk.
+// Reporting the raw errno — or worse, a generic 500 — leaves someone reading deploy
+// logs to work that out for themselves.
+function unwritable(cause, dataPath) {
+  const hosted = Boolean(process.env.VERCEL);
+  if (!UNWRITABLE_CODES.has(cause.code) && !hosted) return cause;
+
+  const what =
+    cause.code === 'EROFS'
+      ? `Cannot write to ${dataPath}: this filesystem is read-only.`
+      : `Cannot write to ${dataPath} (${cause.code ?? 'unknown error'}).`;
+
+  const error = new Error(
+    `${what} Lacuna is storing data in a file because no database is configured — set ` +
+      'POSTGRES_URL (or DATABASE_URL) to a Postgres connection string and redeploy. On Vercel, ' +
+      'adding the variable is not enough on its own: the deployment has to be rebuilt to pick it up.'
+  );
+  // 503, not 500: the app is fine, the deployment is incomplete.
+  error.status = 503;
+  error.cause = cause;
+  return error;
 }

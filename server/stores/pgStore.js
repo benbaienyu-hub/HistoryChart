@@ -162,6 +162,19 @@ export function createPgStore(url) {
       return `Postgres (${redact(url)})`;
     },
 
+    async writable() {
+      try {
+        await initialize();
+        await connect().query(`SELECT 1 FROM ${TABLE} WHERE id = $1`, [ROW_ID]);
+        return { ok: true };
+      } catch (cause) {
+        // The message from `pg` is the useful part here — "password authentication
+        // failed", "no pg_hba.conf entry", "getaddrinfo ENOTFOUND" each point
+        // somewhere different — and it never contains the connection string.
+        return { ok: false, problem: `Postgres said: ${cause.message}` };
+      }
+    },
+
     async close() {
       // Let a write that is already in flight finish before the pool goes away.
       await queue;

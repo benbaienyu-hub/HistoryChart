@@ -92,6 +92,24 @@ export function resetSecretCacheForTests() {
   keyCache.clear();
 }
 
+// Where the encryption key is coming from, for the health check. Not the key.
+export function hasSecret() {
+  if (process.env.LACUNA_SECRET?.trim()) return 'environment';
+  return keyFilePath() ? 'key file' : 'missing';
+}
+
+// The one configuration mistake here, phrased as a fix. Null when it is fine.
+// Deliberately does not load or generate anything: a diagnostic that changes the
+// thing it is diagnosing is not a diagnostic.
+export function secretProblem() {
+  if (hasSecret() !== 'missing') return null;
+  return (
+    'LACUNA_SECRET is not set and there is no local data directory to keep a key file in, so ' +
+    'nobody can save an AI key of their own. Set it to a long random string — ' +
+    '`openssl rand -hex 32` produces one.'
+  );
+}
+
 // Returns a self-describing envelope rather than a bare string: the version lets
 // a future algorithm change read old rows instead of silently mis-decrypting them.
 export function seal(plaintext) {

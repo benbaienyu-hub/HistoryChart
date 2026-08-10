@@ -18,8 +18,7 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleApiRequest } from './api.js';
 import { handleKnowledgeRequest, handleKnowledgeStatus } from './knowledgeRoutes.js';
-import { describeStore } from './store.js';
-import { fileStorage } from './fileStorage.js';
+import { reportHealth } from './healthRoutes.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIST = join(ROOT, 'dist');
@@ -86,10 +85,10 @@ const server = createServer(async (req, res) => {
   serveFile(res, index);
 });
 
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
   console.log(`[lacuna] serving on http://localhost:${PORT}`);
-  // Which store, said out loud: "my accounts keep disappearing" and "I thought it
-  // was using the database" are the same confusion, and this answers both.
-  console.log(`[lacuna] storing data in ${describeStore()}`);
-  console.log(`[lacuna] storing images in ${fileStorage().describe()}`);
+  // Said out loud at boot, and checked rather than assumed: "my accounts keep
+  // disappearing", "I thought it was using the database", and "signing in returns
+  // a 500" are all the same confusion, and this answers them before anyone hits it.
+  await reportHealth();
 });

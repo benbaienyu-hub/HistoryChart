@@ -34,11 +34,16 @@ import {
   handleReviewList,
   handleSubmitReviews,
 } from './reviewRoutes.js';
+import { handleHealth } from './healthRoutes.js';
 import { matchPath, send } from './http.js';
 
 // `auth: true` means the route needs a signed-in user, and gets it as the third
 // argument. Everything about a canvas requires one — there are no public canvases.
 const ROUTES = [
+  // Unauthenticated on purpose: the thing it diagnoses is a deployment where
+  // nobody can sign in. It reports no secrets and nothing about who has an account.
+  { method: 'GET', path: '/api/health', handler: handleHealth },
+
   { method: 'POST', path: '/api/auth/register', handler: handleRegister },
   { method: 'POST', path: '/api/auth/login', handler: handleLogin },
   { method: 'POST', path: '/api/auth/logout', handler: handleLogout },

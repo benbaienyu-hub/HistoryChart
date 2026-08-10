@@ -62,6 +62,13 @@ export function describeStore() {
   return active().describe();
 }
 
+// Whether saving would actually work, asked without saving anything real. A read
+// cannot answer this: on a read-only filesystem, reading a missing file looks
+// exactly like a first run, and everything seems fine until the first write.
+export function storeWritable() {
+  return active().writable();
+}
+
 // Test seams. Both drop the current backend, so the next call builds a fresh one.
 export function setDataPathForTests(path) {
   backend = createFileStore(path);
