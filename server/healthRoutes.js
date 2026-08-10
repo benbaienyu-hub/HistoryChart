@@ -10,7 +10,7 @@
 // that name the fix. It reports no secrets, no connection strings, and nothing
 // about who has an account.
 
-import { describeStore, storeKind, storeWritable } from './store.js';
+import { describeStore, storeKind, storeWritable, visibleDatabaseVars } from './store.js';
 import { fileStorage } from './fileStorage.js';
 import { hasSecret, secretProblem } from './secretBox.js';
 import { hasApiKey, mockEnabled, requireOwnKey } from './aiConfig.js';
@@ -42,6 +42,10 @@ export async function handleHealth(req, res) {
     // Deliberately just the kind, not describeStore(), which includes a host and
     // database name — this route needs no authentication and should stay boring.
     store: storeKind(),
+    // Names only, never values. Empty here while you believe you configured a
+    // database means the variable is not reaching this process — which is a
+    // different problem from the database being wrong.
+    databaseVars: visibleDatabaseVars(),
     images: images.kind,
     canWrite: writable.ok,
     secret: hasSecret(),

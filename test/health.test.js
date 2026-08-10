@@ -11,7 +11,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleApiRequest } from '../server/api.js';
-import { setDataPathForTests, storeWritable } from '../server/store.js';
+import {
+  postgresUrl,
+  setDataPathForTests,
+  storeWritable,
+  visibleDatabaseVars,
+} from '../server/store.js';
 import { resetFileStorageForTests } from '../server/fileStorage.js';
 import { resetSecretCacheForTests, hasSecret, secretProblem } from '../server/secretBox.js';
 import { setEnvFileForTests } from '../server/aiConfig.js';
@@ -45,6 +50,21 @@ beforeEach(() => {
   vi.stubEnv('LACUNA_SECRET', '');
   // Unset by default: some tests set it to take the hosted code path deliberately.
   vi.stubEnv('VERCEL', '');
+  // Blanked so this suite describes a machine with no database configured, whatever
+  // the one running it has.
+  for (const name of [
+    'POSTGRES_URL',
+    'DATABASE_URL',
+    'POSTGRES_URL_NON_POOLING',
+    'DATABASE_URL_UNPOOLED',
+    'PGHOST',
+    'PGUSER',
+    'PGPASSWORD',
+    'PGDATABASE',
+    'PGPORT',
+  ]) {
+    vi.stubEnv(name, '');
+  }
   setEnvFileForTests(null);
 });
 
@@ -166,5 +186,92 @@ describe('the encryption secret', () => {
     const before = hasSecret();
     secretProblem();
     expect(hasSecret()).toBe(before);
+  });
+});
+
+describe('finding a database in the environment', () => {
+  // Every name a hosted Postgres arrives under. Getting this wrong is invisible:
+  // the app just stores data in a file and everything looks fine until a write.
+  it('accepts each recognised URL variable', async () => {
+    for (const name of [
+      'POSTGRES_URL',
+      'DATABASE_URL',
+      'POSTGRES_URL_NON_POOLING',
+      'DATABASE_URL_UNPOOLED',
+    ]) {
+      vi.stubEnv(name, '');
+    }
+    expect(postgresUrl()).toBeNull();
+
+    for (const name of [
+      'POSTGRES_URL',
+      'DATABASE_URL',
+      'POSTGRES_URL_NON_POOLING',
+      'DATABASE_URL_UNPOOLED',
+    ]) {
+      vi.stubEnv(name, `postgres://who@host/db-from-${name}`);
+      expect(postgresUrl(), name).toBe(`postgres://who@host/db-from-${name}`);
+      vi.stubEnv(name, '');
+    }
+  });
+
+  it('prefers the pooled URL when several are set', async () => {
+    vi.stubEnv('DATABASE_URL_UNPOOLED', 'postgres://who@host/direct');
+    vi.stubEnv('POSTGRES_URL', 'postgres://who@host/pooled');
+    expect(postgresUrl()).toBe('postgres://who@host/pooled');
+  });
+
+  it('builds a URL from the libqp variables when that is all there is', async () => {
+    // Neon's Vercel integration sets these alongside the URLs; some setups have
+    // only these, and ignoring them meant falling back to a file with a database
+    // sitting right there.
+    vi.stubEnv('PGHOST', 'ep-cool-name.eu-central-1.aws.neon.tech');
+    vi.stubEnv('PGUSER', 'lacuna_owner');
+    vi.stubEnv('PGPASSWORD', 'npg_secret');
+    vi.stubEnv('PGDATABASE', 'neondb');
+    expect(postgresUrl()).toBe(
+      'postgres://lacuna_owner:npg_secret@ep-cool-name.eu-central-1.aws.neon.tech:5432/neondb'
+    );
+  });
+
+  it('percent-encodes credentials, so a password with punctuation still parses', async () => {
+    vi.stubEnv('PGHOST', 'host');
+    vi.stubEnv('PGUSER', 'user@corp');
+    vi.stubEnv('PGPASSWORD', 'p@ss/word?');
+    vi.stubEnv('PGDATABASE', 'db');
+    const url = postgresUrl();
+    // The point: it round-trips through URL parsing as the values we put in.
+    const parsed = new URL(url);
+    expect(decodeURIComponent(parsed.username)).toBe('user@corp');
+    expect(decodeURIComponent(parsed.password)).toBe('p@ss/word?');
+    expect(parsed.hostname).toBe('host');
+    expect(parsed.pathname).toBe('/db');
+  });
+
+  it('needs host, user and database before it will guess', async () => {
+    vi.stubEnv('PGHOST', 'host');
+    expect(postgresUrl()).toBeNull();
+    vi.stubEnv('PGUSER', 'user');
+    expect(postgresUrl()).toBeNull();
+    vi.stubEnv('PGDATABASE', 'db');
+    expect(postgresUrl()).toBe('postgres://user@host:5432/db');
+  });
+
+  it('reports which variables it can see, by name and never by value', async () => {
+    vi.stubEnv('POSTGRES_URL', 'postgres://who:secret-password@host/db');
+    vi.stubEnv('PGHOST', 'host');
+    const visible = visibleDatabaseVars();
+    expect(visible).toContain('POSTGRES_URL');
+    expect(visible).toContain('PGHOST');
+    expect(JSON.stringify(visible)).not.toContain('secret-password');
+  });
+
+  it('says so in the health report, which is how "I did configure it" gets settled', async () => {
+    const { json } = await get('/api/health');
+    expect(json.databaseVars).toEqual([]);
+    vi.stubEnv('POSTGRES_URL', 'postgres://who:secret-password@host/db');
+    const after = await get('/api/health');
+    expect(after.json.databaseVars).toEqual(['POSTGRES_URL']);
+    expect(JSON.stringify(after.json)).not.toContain('secret-password');
   });
 });

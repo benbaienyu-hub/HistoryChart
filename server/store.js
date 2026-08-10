@@ -22,10 +22,59 @@ import { createPgStore } from './stores/pgStore.js';
 
 export { EMPTY, withDefaults } from './stores/document.js';
 
+// Every name a hosted Postgres is likely to arrive under, pooled first. Vercel's
+// Neon integration sets several of these at once; other platforms pick one. The
+// alternative to accepting them all is an app that silently stores data in a file
+// because the variable was called the other thing.
+//
+// POSTGRES_PRISMA_URL is deliberately absent: it carries Prisma-specific query
+// parameters (`pgbouncer=true`) that `pg` would forward as startup options.
+const URL_VARS = [
+  'POSTGRES_URL',
+  'DATABASE_URL',
+  'POSTGRES_URL_NON_POOLING',
+  'DATABASE_URL_UNPOOLED',
+];
+
+// The libpq variables, which the Neon integration also sets. Without this, a
+// project that has only these looks to us like a project with no database.
+const PART_VARS = ['PGHOST', 'PGUSER', 'PGPASSWORD', 'PGDATABASE', 'PGPORT'];
+
+function env(name) {
+  return process.env[name]?.trim() || null;
+}
+
 export function postgresUrl() {
-  // POSTGRES_URL is what Vercel's Neon integration sets; DATABASE_URL is what
-  // everything else uses. Accepting both means no renaming step at deploy time.
-  return process.env.POSTGRES_URL?.trim() || process.env.DATABASE_URL?.trim() || null;
+  for (const name of URL_VARS) {
+    const value = env(name);
+    if (value) return value;
+  }
+  return fromParts();
+}
+
+// PGHOST/PGUSER/PGPASSWORD/PGDATABASE assembled into a connection string. The
+// credentials are percent-encoded: a generated password containing @ or / would
+// otherwise produce a URL that parses as something else entirely.
+function fromParts() {
+  const host = env('PGHOST');
+  const user = env('PGUSER');
+  const database = env('PGDATABASE');
+  if (!host || !user || !database) return null;
+
+  const password = env('PGPASSWORD');
+  const credentials = password
+    ? `${encodeURIComponent(user)}:${encodeURIComponent(password)}`
+    : encodeURIComponent(user);
+  const port = env('PGPORT') ?? '5432';
+  return `postgres://${credentials}@${host}:${port}/${database}`;
+}
+
+// Which recognised variables this process can actually see — names only, never
+// values. The question "is the variable even reaching the function" is otherwise
+// unanswerable from outside, and it is the first thing worth knowing when the app
+// says it is using a file and you believe you configured a database.
+export function visibleDatabaseVars() {
+  return [...URL_VARS, ...PART_VARS].filter((name) => env(name));
 }
 
 let backend = null;

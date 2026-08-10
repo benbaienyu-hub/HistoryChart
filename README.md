@@ -144,12 +144,25 @@ variable. Nothing else in the app knows which one is in use.
 
 | | Default | Set this instead | Then it uses |
 | --- | --- | --- | --- |
-| Accounts, canvases, schedules | one JSON file (`LACUNA_DATA`, default `.data/lacuna.json`) | `POSTGRES_URL` or `DATABASE_URL` | Postgres, as one `jsonb` document in `lacuna_document` |
+| Accounts, canvases, schedules | one JSON file (`LACUNA_DATA`, default `.data/lacuna.json`) | `POSTGRES_URL`, `DATABASE_URL`, their `_NON_POOLING`/`_UNPOOLED` variants, or `PGHOST`+`PGUSER`+`PGDATABASE` | Postgres, as one `jsonb` document in `lacuna_document` |
 | Uploaded images | files in `.data/uploads/` (`LACUNA_UPLOADS` to move them) | `BLOB_READ_WRITE_TOKEN` | Vercel Blob |
 | The key that encrypts stored AI keys | `.data/secret.key`, generated on first use, mode 0600 | `LACUNA_SECRET` | that value (required where there is no writable disk) |
 
-`npm start` prints which of each it is using, because "my accounts keep vanishing"
-and "I thought it was using the database" are the same confusion.
+`npm start` prints which of each it is using, and **`GET /api/health`** answers the
+same question on a deployment you cannot see the logs of:
+
+```json
+{ "ok": true, "store": "postgres", "databaseVars": ["POSTGRES_URL"],
+  "images": "blob", "canWrite": true, "secret": "environment", "problems": [] }
+```
+
+It needs no session, on purpose — the failure it explains is nobody being able to
+sign in — and it reports names and kinds only: no secrets, no connection string,
+nothing about who has an account. `store: "file"` on a hosted deployment is the
+whole bug: writes will fail, reads won't, so everything looks fine until the first
+sign-up. `databaseVars: []` narrows it further — the variable is not reaching the
+process at all, which on Vercel usually means the deployment predates it and needs
+rebuilding.
 
 The Postgres backend keeps the whole document in one row with a `version` column,
 and every write is a read-modify-write guarded by that version: if another instance
