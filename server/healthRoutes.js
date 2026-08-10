@@ -16,6 +16,21 @@ import { hasSecret, secretProblem } from './secretBox.js';
 import { hasApiKey, mockEnabled, requireOwnKey } from './aiConfig.js';
 import { send } from './http.js';
 
+// Which build is answering. Vercel sets these; they are not secret, and without
+// them "I deployed the fix" and "this URL is running the fix" are indistinguishable
+// from outside — a production URL on the default branch and a preview URL on a
+// feature branch look identical and can be many commits apart.
+function deployment() {
+  // `||`, not `??`: an environment variable that exists but is empty is the same
+  // as absent here, and `??` would report a blank string as if it were a value.
+  const commit = process.env.VERCEL_GIT_COMMIT_SHA?.trim() || null;
+  return {
+    environment: process.env.VERCEL_ENV?.trim() || 'self-hosted',
+    branch: process.env.VERCEL_GIT_COMMIT_REF?.trim() || null,
+    commit: commit && commit.slice(0, 7),
+  };
+}
+
 export async function handleHealth(req, res) {
   const problems = [];
 
@@ -39,6 +54,7 @@ export async function handleHealth(req, res) {
   // 503 when it cannot work, so an uptime check notices without reading the body.
   return send(res, ok ? 200 : 503, {
     ok,
+    deployment: deployment(),
     // Deliberately just the kind, not describeStore(), which includes a host and
     // database name — this route needs no authentication and should stay boring.
     store: storeKind(),

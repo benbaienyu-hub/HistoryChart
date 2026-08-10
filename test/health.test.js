@@ -275,3 +275,29 @@ describe('finding a database in the environment', () => {
     expect(JSON.stringify(after.json)).not.toContain('secret-password');
   });
 });
+
+describe('which build is answering', () => {
+  // A production URL on the default branch and a preview URL on a feature branch
+  // look identical from outside and can be many commits apart. Without this, "I
+  // deployed the fix" and "this URL has the fix" cannot be told apart — which cost
+  // a round trip of confusion once already.
+  it('reports the branch, commit and environment when the platform provides them', async () => {
+    vi.stubEnv('VERCEL_ENV', 'preview');
+    vi.stubEnv('VERCEL_GIT_COMMIT_REF', 'claude/knowledge-canvas-blocks-j58i88');
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', 'ea844ec1234567890abcdef');
+    const { json } = await get('/api/health');
+    expect(json.deployment).toEqual({
+      environment: 'preview',
+      branch: 'claude/knowledge-canvas-blocks-j58i88',
+      commit: 'ea844ec',
+    });
+  });
+
+  it('says so plainly when running outside a platform', async () => {
+    vi.stubEnv('VERCEL_ENV', '');
+    vi.stubEnv('VERCEL_GIT_COMMIT_REF', '');
+    vi.stubEnv('VERCEL_GIT_COMMIT_SHA', '');
+    const { json } = await get('/api/health');
+    expect(json.deployment).toEqual({ environment: 'self-hosted', branch: null, commit: null });
+  });
+});

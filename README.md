@@ -153,7 +153,8 @@ same question on a deployment you cannot see the logs of:
 
 ```json
 { "ok": true, "store": "postgres", "databaseVars": ["POSTGRES_URL"],
-  "images": "blob", "canWrite": true, "secret": "environment", "problems": [] }
+  "images": "blob", "canWrite": true, "secret": "environment", "problems": [],
+  "deployment": { "environment": "production", "branch": "main", "commit": "ea844ec" } }
 ```
 
 It needs no session, on purpose — the failure it explains is nobody being able to
@@ -163,6 +164,12 @@ whole bug: writes will fail, reads won't, so everything looks fine until the fir
 sign-up. `databaseVars: []` narrows it further — the variable is not reaching the
 process at all, which on Vercel usually means the deployment predates it and needs
 rebuilding.
+
+`deployment` says which build answered. This matters more than it sounds: Vercel
+serves the production branch at your main URL and gives every other pushed branch
+its own preview URL, so two URLs that look interchangeable can be many commits
+apart. A 404 from `/api/health` means the build answering that URL predates the
+route — check `branch` before believing anything else the deployment tells you.
 
 The Postgres backend keeps the whole document in one row with a `version` column,
 and every write is a read-modify-write guarded by that version: if another instance
