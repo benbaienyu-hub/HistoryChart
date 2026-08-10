@@ -66,16 +66,18 @@ export function publicUser(user) {
   };
 }
 
-export function findUserByEmail(email) {
+export async function findUserByEmail(email) {
   const normalized = normalizeEmail(email);
-  return readDb().users.find((u) => u.email === normalized) ?? null;
+  const db = await readDb();
+  return db.users.find((u) => u.email === normalized) ?? null;
 }
 
-export function findUserById(id) {
-  return readDb().users.find((u) => u.id === id) ?? null;
+export async function findUserById(id) {
+  const db = await readDb();
+  return db.users.find((u) => u.id === id) ?? null;
 }
 
-export function createUser({ email, name, password }) {
+export async function createUser({ email, name, password }) {
   const normalized = normalizeEmail(email);
   const { hash, salt } = hashPassword(password);
   const user = {
@@ -86,11 +88,11 @@ export function createUser({ email, name, password }) {
     passwordSalt: salt,
     createdAt: Date.now(),
   };
-  mutate((db) => db.users.push(user));
+  await mutate((db) => db.users.push(user));
   return user;
 }
 
-export function createSession(userId) {
+export async function createSession(userId) {
   // 32 random bytes: not guessable, and never derived from anything about the
   // user, so a token tells an attacker nothing.
   const token = randomBytes(32).toString('base64url');
@@ -100,7 +102,7 @@ export function createSession(userId) {
     createdAt: Date.now(),
     expiresAt: Date.now() + SESSION_MAX_AGE * 1000,
   };
-  mutate((db) => {
+  await mutate((db) => {
     // Opportunistic pruning: expired rows are dead weight and this is the only
     // place that reliably runs often enough to clear them.
     db.sessions = db.sessions.filter((s) => s.expiresAt > Date.now());
@@ -109,20 +111,21 @@ export function createSession(userId) {
   return session;
 }
 
-export function userForToken(token) {
+export async function userForToken(token) {
   if (!token) return null;
-  const session = readDb().sessions.find((s) => s.token === token);
+  const db = await readDb();
+  const session = db.sessions.find((s) => s.token === token);
   if (!session) return null;
   if (session.expiresAt <= Date.now()) {
-    destroySession(token);
+    await destroySession(token);
     return null;
   }
   return findUserById(session.userId);
 }
 
-export function destroySession(token) {
+export async function destroySession(token) {
   if (!token) return;
-  mutate((db) => {
+  await mutate((db) => {
     db.sessions = db.sessions.filter((s) => s.token !== token);
   });
 }
@@ -130,17 +133,17 @@ export function destroySession(token) {
 // Every session but (optionally) the one doing the asking. A password change or a
 // recovery has to end the sessions somebody else might be holding, or the change
 // achieves nothing.
-export function destroySessionsForUser(userId, { except } = {}) {
-  mutate((db) => {
+export async function destroySessionsForUser(userId, { except } = {}) {
+  await mutate((db) => {
     db.sessions = db.sessions.filter((s) => s.userId !== userId || s.token === except);
   });
 }
 
 // --- passwords and recovery codes ------------------------------------------
 
-export function setPassword(userId, password) {
+export async function setPassword(userId, password) {
   const { hash, salt } = hashPassword(password);
-  mutate((db) => {
+  await mutate((db) => {
     const user = db.users.find((u) => u.id === userId);
     if (!user) return;
     user.passwordHash = hash;
@@ -168,10 +171,10 @@ export function generateRecoveryCode() {
 // Returns the code in the clear exactly once — this is the only moment it exists
 // outside the user's own notes. It is stored the same way a password is, so a
 // leaked database does not hand over a way in.
-export function issueRecoveryCode(userId) {
+export async function issueRecoveryCode(userId) {
   const code = generateRecoveryCode();
   const { hash, salt } = hashPassword(normalizeRecoveryCode(code));
-  mutate((db) => {
+  await mutate((db) => {
     const user = db.users.find((u) => u.id === userId);
     if (!user) return;
     user.recoveryHash = hash;
@@ -192,8 +195,8 @@ export function verifyRecoveryCode(user, code) {
 // One code, one use. Clearing it on use means a code read over someone's shoulder
 // stops being a spare key the moment it is spent — the reset flow immediately
 // issues a fresh one, so nobody is left without a way back in.
-export function clearRecoveryCode(userId) {
-  mutate((db) => {
+export async function clearRecoveryCode(userId) {
+  await mutate((db) => {
     const user = db.users.find((u) => u.id === userId);
     if (!user) return;
     delete user.recoveryHash;

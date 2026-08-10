@@ -18,7 +18,8 @@ import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { handleApiRequest } from './api.js';
 import { handleKnowledgeRequest, handleKnowledgeStatus } from './knowledgeRoutes.js';
-import { dataFilePath } from './store.js';
+import { describeStore } from './store.js';
+import { fileStorage } from './fileStorage.js';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const DIST = join(ROOT, 'dist');
@@ -87,5 +88,8 @@ const server = createServer(async (req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log(`[lacuna] serving on http://localhost:${PORT}`);
-  console.log(`[lacuna] data file: ${dataFilePath()}`);
+  // Which store, said out loud: "my accounts keep disappearing" and "I thought it
+  // was using the database" are the same confusion, and this answers both.
+  console.log(`[lacuna] storing data in ${describeStore()}`);
+  console.log(`[lacuna] storing images in ${fileStorage().describe()}`);
 });

@@ -41,8 +41,9 @@ export function currentUser(req) {
   return userForToken(sessionToken(req));
 }
 
-function startSession(req, res, user) {
-  const session = createSession(user.id);
+
+async function startSession(req, res, user) {
+  const session = await createSession(user.id);
   setCookie(res, SESSION_COOKIE, session.token, {
     maxAge: SESSION_MAX_AGE,
     secure: isSecureRequest(req),
@@ -57,19 +58,19 @@ export async function handleRegister(req, res) {
   if (!isValidEmail(email)) return send(res, 400, { error: 'Enter a valid email address.' });
   const problem = passwordProblem(body.password);
   if (problem) return send(res, 400, { error: problem });
-  if (findUserByEmail(email)) {
+  if (await findUserByEmail(email)) {
     // Deliberately explicit. Hiding whether an account exists protects privacy on
     // a service where membership is sensitive; here it would just leave people
     // stuck on a sign-up form that refuses them for no stated reason.
     return send(res, 409, { error: 'An account already exists for that email. Sign in instead.' });
   }
 
-  const user = createUser({ email, name: body.name, password: body.password });
+  const user = await createUser({ email, name: body.name, password: body.password });
   // Issued at sign-up rather than on demand: the moment someone needs a recovery
   // code is the moment they can no longer ask for one.
-  const recoveryCode = issueRecoveryCode(user.id);
-  startSession(req, res, user);
-  return send(res, 201, { user: publicUser(findUserByEmail(email)), recoveryCode });
+  const recoveryCode = await issueRecoveryCode(user.id);
+  await startSession(req, res, user);
+  return send(res, 201, { user: publicUser(await findUserByEmail(email)), recoveryCode });
 }
 
 export async function handleLogin(req, res) {
@@ -80,7 +81,7 @@ export async function handleLogin(req, res) {
     return send(res, 429, { error: 'Too many attempts. Wait a few minutes and try again.' });
   }
 
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
   // One message for both "no such account" and "wrong password", so the endpoint
   // can't be used to enumerate who has an account.
   const failed = { error: 'That email and password don’t match an account.' };
@@ -95,18 +96,18 @@ export async function handleLogin(req, res) {
   }
 
   clearAttempts(email);
-  startSession(req, res, user);
+  await startSession(req, res, user);
   return send(res, 200, { user: publicUser(user) });
 }
 
-export function handleLogout(req, res) {
-  destroySession(sessionToken(req));
+export async function handleLogout(req, res) {
+  await destroySession(sessionToken(req));
   clearCookie(res, SESSION_COOKIE, { secure: isSecureRequest(req) });
   return send(res, 200, {});
 }
 
-export function handleMe(req, res) {
-  return send(res, 200, { user: publicUser(currentUser(req)) });
+export async function handleMe(req, res) {
+  return send(res, 200, { user: publicUser(await currentUser(req)) });
 }
 
 // --- getting back in without me ---------------------------------------------
@@ -137,7 +138,7 @@ export async function handleResetPassword(req, res) {
   const problem = passwordProblem(body.password);
   if (problem) return send(res, 400, { error: problem });
 
-  const user = findUserByEmail(email);
+  const user = await findUserByEmail(email);
   // Same answer for "no such account" and "wrong code", so this endpoint cannot be
   // used to find out who has an account here.
   if (!user || !verifyRecoveryCode(user, body.code)) {
@@ -146,16 +147,16 @@ export async function handleResetPassword(req, res) {
   }
 
   clearAttempts(throttleKey);
-  setPassword(user.id, body.password);
-  clearRecoveryCode(user.id);
+  await setPassword(user.id, body.password);
+  await clearRecoveryCode(user.id);
   // Whoever knew the old password loses their sessions with it — that is the point
   // of a reset. This runs before the new session is created, so it survives.
-  destroySessionsForUser(user.id);
+  await destroySessionsForUser(user.id);
   // A spent code is no code at all, and someone who just proved they own the
   // account should not leave the flow with no way back in.
-  const recoveryCode = issueRecoveryCode(user.id);
-  startSession(req, res, user);
-  return send(res, 200, { user: publicUser(findUserByEmail(email)), recoveryCode });
+  const recoveryCode = await issueRecoveryCode(user.id);
+  await startSession(req, res, user);
+  return send(res, 200, { user: publicUser(await findUserByEmail(email)), recoveryCode });
 }
 
 export async function handleChangePassword(req, res, user) {
@@ -176,11 +177,11 @@ export async function handleChangePassword(req, res, user) {
   if (problem) return send(res, 400, { error: problem });
 
   clearAttempts(throttleKey);
-  setPassword(user.id, body.newPassword);
+  await setPassword(user.id, body.newPassword);
   // Every other session goes; this one stays, because signing someone out of the
   // page they are using to change their password is a bug, not security.
-  destroySessionsForUser(user.id, { except: sessionToken(req) });
-  return send(res, 200, { user: publicUser(user) });
+  await destroySessionsForUser(user.id, { except: sessionToken(req) });
+  return send(res, 200, { user: publicUser(await findUserByEmail(user.email)) });
 }
 
 // Re-issuing needs the password even though the caller is already signed in: a
@@ -198,6 +199,6 @@ export async function handleNewRecoveryCode(req, res, user) {
   }
 
   clearAttempts(throttleKey);
-  const recoveryCode = issueRecoveryCode(user.id);
+  const recoveryCode = await issueRecoveryCode(user.id);
   return send(res, 200, { recoveryCode });
 }

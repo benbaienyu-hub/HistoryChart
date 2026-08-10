@@ -11,14 +11,17 @@
     "start": "node server/index.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:pg": "vitest run test/pgStore.test.js test/api.test.js",
     "check-key": "node scripts/check-key.mjs",
     "accounts": "node scripts/accounts.mjs",
     "logo": "node scripts/build-logo.mjs",
     "demo": "OPENAI_MOCK=1 vite"
   },
   "dependencies": {
+    "@vercel/blob": "^2.7.0",
     "framer-motion": "^12.43.0",
     "openai": "^7.1.0",
+    "pg": "^8.23.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "reactflow": "^11.11.4"

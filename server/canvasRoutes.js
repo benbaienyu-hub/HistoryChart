@@ -6,7 +6,7 @@
 // mean the recipient has to exist first, which is the wrong order for an invite.
 
 import { randomUUID } from 'node:crypto';
-import { findUserById, normalizeEmail, isValidEmail } from './accounts.js';
+import { normalizeEmail, isValidEmail } from './accounts.js';
 import { mutate, readDb } from './store.js';
 import { uniqueTitle } from '../src/lib/titles.js';
 import { readBinaryBody, readJsonBody, send } from './http.js';
@@ -23,25 +23,28 @@ import {
 
 export const ROLES = ['edit', 'view'];
 
-function grantsFor(canvasId) {
-  return readDb()
-    .grants.filter((g) => g.canvasId === canvasId)
+// Every helper here is handed the document rather than reading it. With the
+// Postgres backend a read is a query, and a handler that serialized a list of
+// canvases would otherwise make one per canvas — plus one per grant lookup.
+function grantsFor(db, canvasId) {
+  return db.grants
+    .filter((g) => g.canvasId === canvasId)
     .sort((a, b) => a.createdAt - b.createdAt);
 }
 
 // 'owner' can do anything, 'edit' can change the content, 'view' can only read.
 // Returns null when the user has no business seeing the canvas at all.
-export function accessFor(canvas, user) {
+export function accessFor(db, canvas, user) {
   if (!canvas || !user) return null;
   if (canvas.ownerId === user.id) return 'owner';
-  const grant = grantsFor(canvas.id).find((g) => g.email === user.email);
+  const grant = grantsFor(db, canvas.id).find((g) => g.email === user.email);
   return grant ? grant.role : null;
 }
 
 // The client-facing shape. Deliberately not the stored row: internal ids stay in,
 // the owner's email comes out, and `role` tells the UI what to allow.
-function serialize(canvas, user) {
-  const grants = grantsFor(canvas.id);
+function serialize(db, canvas, user) {
+  const grants = grantsFor(db, canvas.id);
   return {
     id: canvas.id,
     title: canvas.title,
@@ -50,27 +53,27 @@ function serialize(canvas, user) {
     lastScore: canvas.lastScore ?? null,
     createdAt: canvas.createdAt,
     updatedAt: canvas.updatedAt,
-    ownerEmail: findUserById(canvas.ownerId)?.email ?? '',
+    ownerEmail: db.users.find((u) => u.id === canvas.ownerId)?.email ?? '',
     sharedWith: grants.map((g) => g.email),
     grants: grants.map((g) => ({ email: g.email, role: g.role })),
-    role: accessFor(canvas, user),
+    role: accessFor(db, canvas, user),
   };
 }
 
-function byId(id) {
-  return readDb().canvases.find((c) => c.id === id) ?? null;
+function byId(db, id) {
+  return db.canvases.find((c) => c.id === id) ?? null;
 }
 
-function titlesOwnedBy(ownerId, exceptId = null) {
-  return readDb()
-    .canvases.filter((c) => c.ownerId === ownerId && c.id !== exceptId)
+function titlesOwnedBy(db, ownerId, exceptId = null) {
+  return db.canvases
+    .filter((c) => c.ownerId === ownerId && c.id !== exceptId)
     .map((c) => c.title);
 }
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
-export function handleList(req, res, user) {
-  const db = readDb();
+export async function handleList(req, res, user) {
+  const db = await readDb();
   const recent = (a, b) => b.updatedAt - a.updatedAt;
 
   const owned = db.canvases.filter((c) => c.ownerId === user.id).sort(recent);
@@ -82,40 +85,45 @@ export function handleList(req, res, user) {
     .sort(recent);
 
   return send(res, 200, {
-    owned: owned.map((c) => serialize(c, user)),
-    shared: shared.map((c) => serialize(c, user)),
+    owned: owned.map((c) => serialize(db, c, user)),
+    shared: shared.map((c) => serialize(db, c, user)),
   });
 }
 
 export async function handleCreate(req, res, user) {
   const body = await readJsonBody(req);
+  const db = await readDb();
   const now = Date.now();
   const canvas = {
     id: randomUUID(),
     ownerId: user.id,
-    title: uniqueTitle(body.title, titlesOwnedBy(user.id)),
+    title: uniqueTitle(body.title, titlesOwnedBy(db, user.id)),
     nodes: asArray(body.nodes),
     edges: asArray(body.edges),
     lastScore: null,
     createdAt: now,
     updatedAt: now,
   };
-  mutate((db) => db.canvases.push(canvas));
-  return send(res, 201, { canvas: serialize(canvas, user) });
+  await mutate((doc) => doc.canvases.push(canvas));
+  // Serialized against the document as it was read: a brand-new canvas has no
+  // grants, and its owner is the caller.
+  return send(res, 201, { canvas: serialize(db, canvas, user) });
 }
 
-export function handleGet(req, res, user, { id }) {
-  const canvas = byId(id);
-  const role = accessFor(canvas, user);
+export async function handleGet(req, res, user, { id }) {
+  const db = await readDb();
+  const canvas = byId(db, id);
+  const role = accessFor(db, canvas, user);
   // 404 rather than 403 for a canvas you cannot reach: "it exists but is not
   // yours" is information about someone else's library.
   if (!role) return send(res, 404, { error: 'Canvas not found.' });
-  return send(res, 200, { canvas: serialize(canvas, user) });
+  return send(res, 200, { canvas: serialize(db, canvas, user) });
 }
 
 export async function handleUpdate(req, res, user, { id }) {
-  const canvas = byId(id);
-  const role = accessFor(canvas, user);
+  const db = await readDb();
+  const canvas = byId(db, id);
+  const role = accessFor(db, canvas, user);
   if (!role) return send(res, 404, { error: 'Canvas not found.' });
   if (role === 'view') {
     return send(res, 403, { error: 'You have view-only access to this canvas.' });
@@ -129,20 +137,27 @@ export async function handleUpdate(req, res, user, { id }) {
   if (body.title !== undefined) {
     // Uniqueness is per owner, and it is the owner's namespace even when an
     // editor is the one renaming.
-    patch.title = uniqueTitle(body.title, titlesOwnedBy(canvas.ownerId, canvas.id));
+    patch.title = uniqueTitle(body.title, titlesOwnedBy(db, canvas.ownerId, canvas.id));
   }
 
-  const updated = mutate((db) => {
-    const row = db.canvases.find((c) => c.id === id);
+  const updated = await mutate((doc) => {
+    const row = doc.canvases.find((c) => c.id === id);
+    // Gone between the read and the write: whoever deleted it wins, and there is
+    // nothing left to patch.
+    if (!row) return null;
     Object.assign(row, patch);
     return row;
   });
-  return send(res, 200, { canvas: serialize(updated, user) });
+  if (!updated) return send(res, 404, { error: 'Canvas not found.' });
+  // The grants in `db` are still current — this request changed content, not
+  // sharing — so it can serialize the new row against the old document.
+  return send(res, 200, { canvas: serialize(db, updated, user) });
 }
 
-export function handleDelete(req, res, user, { id }) {
-  const canvas = byId(id);
-  const role = accessFor(canvas, user);
+export async function handleDelete(req, res, user, { id }) {
+  const db = await readDb();
+  const canvas = byId(db, id);
+  const role = accessFor(db, canvas, user);
   if (!role) return send(res, 404, { error: 'Canvas not found.' });
   // An editor can change a canvas but not destroy it. Deleting other people's
   // work is not something "can edit" should imply.
@@ -150,22 +165,22 @@ export function handleDelete(req, res, user, { id }) {
     return send(res, 403, { error: 'Only the owner can delete this canvas.' });
   }
 
-  mutate((db) => {
-    db.canvases = db.canvases.filter((c) => c.id !== id);
-    db.grants = db.grants.filter((g) => g.canvasId !== id);
-  });
-  // Otherwise the pictures outlive the canvas that referenced them, and nothing
-  // will ever ask for them again. Same for everyone's review schedules.
-  deleteImagesForCanvas(id);
-  mutate((db) => {
-    db.reviews = (db.reviews ?? []).filter((r) => r.canvasId !== id);
+  // The pictures go first: once the canvas row is gone, nothing knows which
+  // images belonged to it, and they would sit in storage forever.
+  await deleteImagesForCanvas(id);
+  await mutate((doc) => {
+    doc.canvases = doc.canvases.filter((c) => c.id !== id);
+    doc.grants = doc.grants.filter((g) => g.canvasId !== id);
+    // Everyone's schedules for its blocks go with it.
+    doc.reviews = (doc.reviews ?? []).filter((r) => r.canvasId !== id);
   });
   return send(res, 200, {});
 }
 
 export async function handleShare(req, res, user, { id }) {
-  const canvas = byId(id);
-  const role = accessFor(canvas, user);
+  const db = await readDb();
+  const canvas = byId(db, id);
+  const role = accessFor(db, canvas, user);
   if (!role) return send(res, 404, { error: 'Canvas not found.' });
   if (role !== 'owner') {
     return send(res, 403, { error: 'Only the owner can share this canvas.' });
@@ -178,17 +193,21 @@ export async function handleShare(req, res, user, { id }) {
   if (!isValidEmail(email)) return send(res, 400, { error: 'Enter a valid email address.' });
   if (email === user.email) return send(res, 400, { error: 'That’s your own account.' });
 
-  const existing = grantsFor(id).find((g) => g.email === email);
+  const existing = grantsFor(db, id).find((g) => g.email === email);
   if (existing && existing.role === grantRole) {
     return send(res, 409, { error: 'Already shared with that address.' });
   }
 
-  mutate((db) => {
-    if (existing) {
+  await mutate((doc) => {
+    // Re-checked inside the callback rather than reusing `existing`: this may run
+    // against a freshly read document in which the grant now exists, and pushing a
+    // second row for the same address would double it.
+    const already = doc.grants.find((g) => g.canvasId === id && g.email === email);
+    if (already) {
       // Re-sharing with a different role is a change of access, not an error.
-      db.grants.find((g) => g.canvasId === id && g.email === email).role = grantRole;
+      already.role = grantRole;
     } else {
-      db.grants.push({
+      doc.grants.push({
         canvasId: id,
         email,
         role: grantRole,
@@ -198,9 +217,11 @@ export async function handleShare(req, res, user, { id }) {
     }
   });
 
-  const registered = readDb().users.some((u) => u.email === email);
+  // Re-read: the response carries the grant list, which is exactly what changed.
+  const after = await readDb();
+  const registered = after.users.some((u) => u.email === email);
   return send(res, 200, {
-    canvas: serialize(byId(id), user),
+    canvas: serialize(after, byId(after, id), user),
     // The UI says something different depending on this: an invite to an address
     // with no account yet is still valid, and the recipient needs telling to sign
     // up with that exact address.
@@ -209,8 +230,9 @@ export async function handleShare(req, res, user, { id }) {
 }
 
 export async function handleUnshare(req, res, user, { id }) {
-  const canvas = byId(id);
-  const role = accessFor(canvas, user);
+  const db = await readDb();
+  const canvas = byId(db, id);
+  const role = accessFor(db, canvas, user);
   if (!role) return send(res, 404, { error: 'Canvas not found.' });
   if (role !== 'owner') {
     return send(res, 403, { error: 'Only the owner can change sharing.' });
@@ -218,10 +240,11 @@ export async function handleUnshare(req, res, user, { id }) {
 
   const body = await readJsonBody(req);
   const email = normalizeEmail(body.email);
-  mutate((db) => {
-    db.grants = db.grants.filter((g) => !(g.canvasId === id && g.email === email));
+  await mutate((doc) => {
+    doc.grants = doc.grants.filter((g) => !(g.canvasId === id && g.email === email));
   });
-  return send(res, 200, { canvas: serialize(byId(id), user) });
+  const after = await readDb();
+  return send(res, 200, { canvas: serialize(after, byId(after, id), user) });
 }
 
 // --- images ----------------------------------------------------------------
@@ -239,8 +262,9 @@ function decodeName(raw) {
 // Uploaded against a canvas, so permission to add a picture is the same as
 // permission to edit the block it goes in.
 export async function handleImageUpload(req, res, user, { id }) {
-  const canvas = byId(id);
-  const role = accessFor(canvas, user);
+  const db = await readDb();
+  const canvas = byId(db, id);
+  const role = accessFor(db, canvas, user);
   if (!role) return send(res, 404, { error: 'Canvas not found.' });
   if (role === 'view') {
     return send(res, 403, { error: 'You have view-only access to this canvas.' });
@@ -253,7 +277,7 @@ export async function handleImageUpload(req, res, user, { id }) {
   const bytes = await readBinaryBody(req, MAX_IMAGE_BYTES);
   if (bytes.length === 0) return send(res, 400, { error: 'That file was empty.' });
 
-  const image = saveImage({
+  const image = await saveImage({
     canvasId: id,
     ownerId: user.id,
     type,
@@ -266,18 +290,19 @@ export async function handleImageUpload(req, res, user, { id }) {
 // Serving is gated the same way the canvas is: an unguessable URL is not the same
 // as a permission check, and someone removed from a canvas should lose its pictures
 // too.
-export function handleImageGet(req, res, user, { id }) {
-  const image = findImage(id);
+export async function handleImageGet(req, res, user, { id }) {
+  const db = await readDb();
+  const image = await findImage(id);
   if (!image) return send(res, 404, { error: 'Image not found.' });
-  if (!accessFor(byId(image.canvasId), user)) {
+  if (!accessFor(db, byId(db, image.canvasId), user)) {
     return send(res, 404, { error: 'Image not found.' });
   }
 
   let bytes;
   try {
-    bytes = readImageBytes(image);
+    bytes = await readImageBytes(image);
   } catch {
-    return send(res, 404, { error: 'That image is no longer on disk.' });
+    return send(res, 404, { error: 'Those image bytes are no longer in storage.' });
   }
 
   res.statusCode = 200;
@@ -293,12 +318,13 @@ export function handleImageGet(req, res, user, { id }) {
   res.end(bytes);
 }
 
-export function handleImageDelete(req, res, user, { id }) {
-  const image = findImage(id);
+export async function handleImageDelete(req, res, user, { id }) {
+  const db = await readDb();
+  const image = await findImage(id);
   if (!image) return send(res, 404, { error: 'Image not found.' });
-  const role = accessFor(byId(image.canvasId), user);
+  const role = accessFor(db, byId(db, image.canvasId), user);
   if (!role || role === 'view') return send(res, 404, { error: 'Image not found.' });
-  removeImage(image);
+  await removeImage(image);
   return send(res, 200, {});
 }
 

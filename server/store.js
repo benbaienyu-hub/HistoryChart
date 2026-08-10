@@ -1,72 +1,77 @@
-// The server's data store: a single JSON file, written atomically.
+// The server's data store. Two backends, one interface:
 //
-// Why a file and not SQLite. `node:sqlite` exists but is experimental and absent
-// before Node 22.5, and `better-sqlite3` is a native module that has to compile —
-// either one turns "clone and run" into a build-tools problem on somebody else's
-// laptop. A JSON file has no install step at all, and at this app's scale
-// (hundreds of accounts, a debounced save per edit) rewriting it is cheap.
+//   readDb()    -> the whole document, for reading
+//   mutate(fn)  -> apply fn to the document and persist it
 //
-// Everything goes through readDb/mutate, so the swap to a real database when the
-// numbers justify it touches this module and nothing else.
+// A JSON file by default, so cloning the repo and running it needs no database at
+// all. Postgres when POSTGRES_URL (or DATABASE_URL) is set, which is what makes
+// hosting on a platform with no writable disk possible — see stores/pgStore.js.
+//
+// Both are async, because one of them talks over a network. That is the only
+// reason: the file backend does its work synchronously behind the promise.
+//
+// Why the whole document rather than a table per entity. The app's data is small
+// and highly interlinked, and the logic above this module was written against a
+// plain object. Keeping that shape means the database swap is this module plus two
+// files, instead of rewriting every query in the app — and at a few hundred
+// kilobytes, reading and writing it whole costs less than the code it saves.
+// The cost is paid in mutate(): see the conflict handling there.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { createFileStore } from './stores/fileStore.js';
+import { createPgStore } from './stores/pgStore.js';
 
-const DEFAULT_PATH = fileURLToPath(new URL('../.data/lacuna.json', import.meta.url));
+export { EMPTY, withDefaults } from './stores/document.js';
 
-const EMPTY = {
-  version: 1,
-  users: [],
-  sessions: [],
-  canvases: [],
-  grants: [],
-  images: [],
-  // Spaced-repetition state, one row per user per block — see reviewRoutes.js.
-  reviews: [],
-  // Each account's own AI credential, encrypted — see aiKeys.js.
-  aiKeys: [],
-};
-
-let dataPath = process.env.LACUNA_DATA || DEFAULT_PATH;
-let cache = null;
-
-// Test seam: point the store at a temp file, and drop the cache with it.
-export function setDataPathForTests(path) {
-  dataPath = path;
-  cache = null;
+export function postgresUrl() {
+  // POSTGRES_URL is what Vercel's Neon integration sets; DATABASE_URL is what
+  // everything else uses. Accepting both means no renaming step at deploy time.
+  return process.env.POSTGRES_URL?.trim() || process.env.DATABASE_URL?.trim() || null;
 }
 
-export function dataFilePath() {
-  return dataPath;
-}
+let backend = null;
 
-function load() {
-  if (cache) return cache;
-  try {
-    const parsed = JSON.parse(readFileSync(dataPath, 'utf8'));
-    // Merge over EMPTY so a file written by an older version is still readable.
-    cache = { ...structuredClone(EMPTY), ...parsed };
-  } catch {
-    // Missing or unreadable: start empty rather than crash. A corrupt file is
-    // the one case worth being loud about, but not at the cost of the process.
-    cache = structuredClone(EMPTY);
+function active() {
+  if (!backend) {
+    const url = postgresUrl();
+    backend = url ? createPgStore(url) : createFileStore();
   }
-  return cache;
+  return backend;
+}
+
+// Which one is in use. Reported at startup, because "my accounts keep vanishing"
+// and "I thought it was using the database" are the same confusion.
+export function storeKind() {
+  return active().kind;
 }
 
 export function readDb() {
-  return load();
+  return active().read();
 }
 
-// Writes go to a temp file and are renamed into place, which is atomic on POSIX:
-// a crash mid-write leaves the previous good file rather than a half-written one.
 export function mutate(fn) {
-  const db = load();
-  const result = fn(db);
-  mkdirSync(dirname(dataPath), { recursive: true });
-  const tmp = `${dataPath}.tmp`;
-  writeFileSync(tmp, JSON.stringify(db, null, 2));
-  renameSync(tmp, dataPath);
-  return result;
+  return active().mutate(fn);
+}
+
+// Only meaningful for the file backend; kept at this level because callers and
+// diagnostics ask the store where its data is without caring which kind it is.
+export function dataFilePath() {
+  return active().dataPath ?? null;
+}
+
+export function describeStore() {
+  return active().describe();
+}
+
+// Test seams. Both drop the current backend, so the next call builds a fresh one.
+export function setDataPathForTests(path) {
+  backend = createFileStore(path);
+}
+
+export function usePostgresForTests(url) {
+  backend = createPgStore(url);
+}
+
+export async function resetStoreForTests() {
+  await backend?.close?.();
+  backend = null;
 }

@@ -433,7 +433,7 @@ function send(res, status, payload) {
 // Exported so the dev-server plugin and the standalone server (server/index.mjs)
 // answer this identically — the client uses it to decide whether the AI features
 // are available at all.
-export function handleKnowledgeStatus(req, res) {
+export async function handleKnowledgeStatus(req, res) {
   if (mockEnabled()) {
     send(res, 200, {
       configured: true,
@@ -450,7 +450,7 @@ export function handleKnowledgeStatus(req, res) {
   // whether the server has one: with own-key mode on, a signed-in guest without a
   // key of their own has no AI at all, and the UI needs to say so rather than
   // offering buttons that will fail.
-  const credentials = credentialsForUser(currentUser(req));
+  const credentials = await credentialsForUser(await currentUser(req));
   send(res, 200, {
     configured: Boolean(credentials.apiKey),
     model: credentials.model ?? readModel(),
@@ -489,7 +489,7 @@ export async function handleKnowledgeRequest(req, res) {
   // Resolved once, so the error branches below can report the credential that
   // actually failed rather than re-reading the environment and describing a key
   // the request never used.
-  const credentials = credentialsForUser(currentUser(req));
+  const credentials = await credentialsForUser(await currentUser(req));
   const ownKey = credentials.source === 'user';
 
   try {
@@ -579,6 +579,16 @@ export async function handleKnowledgeRequest(req, res) {
   }
 }
 
+function asMiddleware(handler) {
+  return (req, res, next) => {
+    handler(req, res).catch((error) => {
+      console.error('[knowledge] unhandled:', error);
+      if (!res.headersSent) send(res, 500, { error: 'Something went wrong on the server.' });
+      else next(error);
+    });
+  };
+}
+
 // Vite dev-server plugin: makes `npm run dev` serve the route with no extra
 // process. In production, mount handleKnowledgeRequest in your own server.
 export function knowledgeApiPlugin() {
@@ -596,8 +606,11 @@ export function knowledgeApiPlugin() {
           console.log(`[knowledge] using ${readBaseUrl()} with model "${readModel()}".`);
         }
       }
-      server.middlewares.use('/api/knowledge', handleKnowledgeRequest);
-      server.middlewares.use('/api/knowledge-status', handleKnowledgeStatus);
+      // Wrapped, because both handlers are async now (they read the store to find
+      // out whose key pays). Connect middleware ignores a returned promise, so a
+      // rejection would surface as an unhandled rejection and no response at all.
+      server.middlewares.use('/api/knowledge', asMiddleware(handleKnowledgeRequest));
+      server.middlewares.use('/api/knowledge-status', asMiddleware(handleKnowledgeStatus));
     },
   };
 }

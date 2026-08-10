@@ -28,9 +28,12 @@ async function request(method, path, body, options = {}) {
     });
   } catch (cause) {
     // fetch only rejects when nothing answered, and the browser's wording for
-    // that ("Failed to fetch") reads like a login problem. Name the real cause.
+    // that ("Failed to fetch") reads like a login problem. Name the real cause —
+    // without assuming the server is a dev server on this machine, which it isn't
+    // once the app is deployed.
     throw new ApiError(
-      'Could not reach the server. Is `npm run dev` still running in your terminal?',
+      'Could not reach the server. Check your connection — or, if you are running ' +
+        'Lacuna yourself, that its terminal is still going.',
       0,
       { cause }
     );

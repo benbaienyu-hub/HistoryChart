@@ -16,12 +16,13 @@ import { open, seal } from './secretBox.js';
 const MAX_KEY_LENGTH = 400;
 const MAX_MODEL_LENGTH = 120;
 
-function rows() {
-  return readDb().aiKeys ?? [];
+async function rows() {
+  const db = await readDb();
+  return db.aiKeys ?? [];
 }
 
-function rowFor(userId) {
-  return rows().find((row) => row.userId === userId) ?? null;
+async function rowFor(userId) {
+  return (await rows()).find((row) => row.userId === userId) ?? null;
 }
 
 // A base URL is the difference between "my OpenAI key" and "my free Groq key", so
@@ -71,7 +72,7 @@ export function maskKey(key) {
   return `${text.slice(0, 3)}…${text.slice(-4)}`;
 }
 
-export function setUserAiKey(userId, { apiKey, baseUrl, model }) {
+export async function setUserAiKey(userId, { apiKey, baseUrl, model }) {
   const row = {
     userId,
     secret: seal(String(apiKey).trim()),
@@ -80,7 +81,7 @@ export function setUserAiKey(userId, { apiKey, baseUrl, model }) {
     model: normalizeModel(model),
     updatedAt: Date.now(),
   };
-  mutate((db) => {
+  await mutate((db) => {
     db.aiKeys = (db.aiKeys ?? []).filter((r) => r.userId !== userId);
     db.aiKeys.push(row);
   });
@@ -90,11 +91,14 @@ export function setUserAiKey(userId, { apiKey, baseUrl, model }) {
 // Changing the model or provider without re-pasting the key: the settings screen
 // can't send the key back (it never had it), so a partial update has to be able to
 // keep the stored one.
-export function updateUserAiSettings(userId, { baseUrl, model }) {
-  const existing = rowFor(userId);
-  if (!existing) return null;
-  mutate((db) => {
-    const row = db.aiKeys.find((r) => r.userId === userId);
+export async function updateUserAiSettings(userId, { baseUrl, model }) {
+  if (!(await rowFor(userId))) return null;
+  await mutate((db) => {
+    // Located inside the callback, and checked: with the Postgres backend this
+    // callback can be re-run against a freshly read document, in which the row
+    // might no longer be there.
+    const row = (db.aiKeys ?? []).find((r) => r.userId === userId);
+    if (!row) return;
     row.baseUrl = normalizeBaseUrl(baseUrl);
     row.model = normalizeModel(model);
     row.updatedAt = Date.now();
@@ -102,8 +106,8 @@ export function updateUserAiSettings(userId, { baseUrl, model }) {
   return describeUserAiKey(userId);
 }
 
-export function clearUserAiKey(userId) {
-  mutate((db) => {
+export async function clearUserAiKey(userId) {
+  await mutate((db) => {
     db.aiKeys = (db.aiKeys ?? []).filter((r) => r.userId !== userId);
   });
 }
@@ -111,8 +115,8 @@ export function clearUserAiKey(userId) {
 // The decrypted credential, for the one caller that needs it: the module that
 // makes the model request. Null when the account has no key of its own, or when
 // the row cannot be decrypted (a database restored without its secret.key).
-export function getUserAiCredentials(userId) {
-  const row = rowFor(userId);
+export async function getUserAiCredentials(userId) {
+  const row = await rowFor(userId);
   if (!row) return null;
   const apiKey = open(row.secret);
   if (!apiKey) return null;
@@ -120,8 +124,8 @@ export function getUserAiCredentials(userId) {
 }
 
 // What the settings screen is allowed to know.
-export function describeUserAiKey(userId) {
-  const row = rowFor(userId);
+export async function describeUserAiKey(userId) {
+  const row = await rowFor(userId);
   if (!row) return { configured: false, preview: null, baseUrl: null, model: null, updatedAt: null };
   return {
     configured: true,
@@ -136,5 +140,5 @@ export function describeUserAiKey(userId) {
 }
 
 export function deleteAiKeysForUser(userId) {
-  clearUserAiKey(userId);
+  return clearUserAiKey(userId);
 }

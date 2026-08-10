@@ -25,8 +25,11 @@ const IV_BYTES = 12; // 96 bits, the size GCM is defined for
 // but a test that repoints the data path must get a different key.
 const keyCache = new Map();
 
+// Null when the store has no file behind it, which is the signal that this
+// deployment has to supply LACUNA_SECRET instead.
 function keyFilePath() {
-  return join(dirname(dataFilePath()), 'secret.key');
+  const file = dataFilePath();
+  return file ? join(dirname(file), 'secret.key') : null;
 }
 
 // LACUNA_SECRET wins when set, so a hosted deployment can hold the secret in its
@@ -45,6 +48,17 @@ function loadKey() {
   }
 
   const path = keyFilePath();
+  if (!path) {
+    // No data file means no disk to keep a key on — a serverless deployment. There
+    // is nowhere to generate one that would survive the request, and silently
+    // making a new key each time would mean every stored credential is unreadable
+    // the moment it is written. Say what to set.
+    throw new Error(
+      'LACUNA_SECRET is not set, and there is no local data directory to keep a key file in. ' +
+        'Set LACUNA_SECRET to a long random string in the environment — `openssl rand -hex 32` ' +
+        'produces one — so stored API keys can be encrypted and read back.'
+    );
+  }
   if (keyCache.has(path)) return keyCache.get(path);
 
   let key;

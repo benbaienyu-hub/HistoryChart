@@ -131,10 +131,60 @@ works with no CORS setup. **Put it behind HTTPS** — the cookie only sets `Secu
 when the request arrives over https (directly or via `x-forwarded-proto`), so a
 plain-http deployment would send sessions in the clear.
 
-**Whatever you deploy to needs a persistent disk.** Accounts, canvases, and uploaded
-images are files, so a host with an ephemeral filesystem — most serverless platforms,
-including Vercel and Netlify — silently wipes every account on each deploy. Use a
-small VM, or a PaaS with a mounted volume and `LACUNA_DATA` pointed at it.
+This needs a **persistent disk**, because by default accounts, canvases and images
+are files. A host with an ephemeral filesystem would wipe every account on each
+deploy — so either use a small VM or a volume with `LACUNA_DATA` pointed at it, or
+switch the store to Postgres and the images to a blob store, which is what the next
+section does.
+
+### Where it stores things
+
+Two backends each for the document and for uploaded images, chosen by environment
+variable. Nothing else in the app knows which one is in use.
+
+| | Default | Set this instead | Then it uses |
+| --- | --- | --- | --- |
+| Accounts, canvases, schedules | one JSON file (`LACUNA_DATA`, default `.data/lacuna.json`) | `POSTGRES_URL` or `DATABASE_URL` | Postgres, as one `jsonb` document in `lacuna_document` |
+| Uploaded images | files in `.data/uploads/` (`LACUNA_UPLOADS` to move them) | `BLOB_READ_WRITE_TOKEN` | Vercel Blob |
+| The key that encrypts stored AI keys | `.data/secret.key`, generated on first use, mode 0600 | `LACUNA_SECRET` | that value (required where there is no writable disk) |
+
+`npm start` prints which of each it is using, because "my accounts keep vanishing"
+and "I thought it was using the database" are the same confusion.
+
+The Postgres backend keeps the whole document in one row with a `version` column,
+and every write is a read-modify-write guarded by that version: if another instance
+wrote first, the callback re-runs against *their* document instead of overwriting
+it. Writes from one process are also queued, because optimistic retries alone
+starve under load — twelve simultaneous writers made two of them give up, measured
+against a real database, and the queue removes that contention entirely.
+
+### Deploying to Vercel (free tier)
+
+Vercel has no writable disk, so this needs both backends above. `vercel.json` and
+`api/index.js` are already in the repo — the whole API runs as one function, and
+`dist/` is served as static files.
+
+1. Push this branch to GitHub and import the repo at vercel.com. It will detect
+   Vite and the `vercel.json`.
+2. In the project's **Storage** tab, add a **Neon** Postgres database (Vercel's own
+   Postgres was retired in December 2024; Neon is the marketplace integration) and
+   a **Blob** store. Both set their environment variables for you: `POSTGRES_URL`
+   from Neon, `BLOB_READ_WRITE_TOKEN` from Blob.
+3. In **Settings → Environment Variables**, add:
+   - `LACUNA_SECRET` — `openssl rand -hex 32`. Without it, saving an AI key fails
+     with a message telling you this; there is no disk to keep a generated key on.
+   - `OPENAI_API_KEY` — optional, and only if you want the shared key to work.
+     Everyone can add their own in the app instead.
+4. Deploy. The `lacuna_document` table is created on the first request.
+
+Two limits worth knowing before you rely on it: Vercel's Hobby tier is licensed for
+**non-commercial use only**, and an AI request has to finish inside the function's
+`maxDuration` (60s, set in `vercel.json`) — a slow model on a Detailed graph is the
+one thing likely to hit that.
+
+The database backend is covered by tests against a real Postgres, including the
+whole HTTP suite (`npm run test:pg` with `TEST_POSTGRES_URL` set). The Vercel
+deployment itself has not been run — that first deploy will be yours.
 
 ### Letting someone else use it
 
@@ -619,7 +669,11 @@ hardcode white or black and both themes stay in sync.
 | `server/secretBox.js` | AES-256-GCM for the few stored values that are secrets |
 | `scripts/accounts.mjs` | `npm run accounts` — the owner's backstop for a lost code |
 | `server/canvasRoutes.js` | Canvas CRUD, share grants, permission checks |
-| `server/store.js` | The JSON data store, written atomically |
+| `server/store.js` | Picks a store backend and exposes readDb/mutate |
+| `server/stores/fileStore.js` | The JSON file, written atomically — the default |
+| `server/stores/pgStore.js` | Postgres: one document, one version column, queued writes |
+| `server/fileStorage.js` | Where image bytes go: local disk, or Vercel Blob |
+| `api/index.js` | The whole API as one serverless function (see vercel.json) |
 | `server/index.mjs` | The standalone server — `npm start` |
 | `src/lib/titles.js` | The unique-title rule, shared by the client and the server |
 | `src/lib/canvasStore.js` | Pre-account local canvases, kept for import, plus the last-opened pointer |
@@ -641,9 +695,11 @@ holding markup and state wiring.
   by granting an email address access, and the recipient sees the canvas the next
   time they sign in — you have to tell them yourself. Password recovery uses a code
   the account holder keeps (see *Using it independently of you*).
-- **One JSON file.** The store is a single file rewritten atomically on each save.
-  Right for tens of accounts, not for hundreds of concurrent writers; `readDb` and
-  `mutate` in `server/store.js` are the two functions a real database would replace.
+- **One document, whichever backend.** Both stores keep everything in a single
+  document rewritten on each save — a file locally, a `jsonb` row in Postgres. Right
+  for tens of accounts, not for hundreds of concurrent writers: the write path is
+  serialized, so throughput is one save at a time per process. Splitting it into
+  tables is a `server/stores/` change and nothing above it.
 - **No sub-block permissions.** A share covers a whole canvas — view or edit —
   and there is no per-block visibility.
 - **Encryption at rest covers stored AI keys, not notes.** The keys are encrypted
@@ -660,6 +716,7 @@ npm run lint     # oxlint
 npm test         # vitest, single run
 npm run check-key   # diagnose an OPENAI_API_KEY that isn't working
 npm run accounts    # list accounts, or issue someone a fresh recovery code
+npm run test:pg     # store + HTTP suite against a real Postgres (needs TEST_POSTGRES_URL)
 npm start           # serve the built app + API from one Node process
 npm run demo        # dev server in offline mode — no key, no network, no bill
 npm run logo        # regenerate public/*.svg from the shared mark geometry

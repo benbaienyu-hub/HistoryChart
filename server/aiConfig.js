@@ -131,8 +131,8 @@ export function serverCredentials({ evenWithoutKey = false } = {}) {
   };
 }
 
-export function credentialsForUser(user) {
-  const own = user ? getUserAiCredentials(user.id) : null;
+export async function credentialsForUser(user) {
+  const own = user ? await getUserAiCredentials(user.id) : null;
   if (own) {
     return {
       apiKey: own.apiKey,

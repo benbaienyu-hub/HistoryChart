@@ -49,8 +49,8 @@ async function requestKnowledge({ topic, notes, childLabels, level, context, max
     // browser's own wording for that is "Failed to fetch" — which sounds like an
     // AI or key problem and is not one. Name the actual cause instead.
     throw new Error(
-      'Could not reach the local server. Is `npm run dev` still running? Check that ' +
-        'terminal for a crash, and that the page is open on the port it printed.',
+      'Could not reach the server. If you are running Lacuna yourself, check that ' +
+        'terminal for a crash; otherwise it is a connection problem, not an AI one.',
       { cause }
     );
   }

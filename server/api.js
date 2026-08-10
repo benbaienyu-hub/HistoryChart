@@ -88,7 +88,7 @@ export async function handleApiRequest(req, res) {
 
     try {
       if (route.auth) {
-        const user = currentUser(req);
+        const user = await currentUser(req);
         if (!user) {
           send(res, 401, { error: 'Sign in to continue.' });
           return true;

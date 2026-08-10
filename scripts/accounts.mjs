@@ -25,10 +25,10 @@ The code is shown once. Give it to them over something you trust, and they use
 "Forgot your password?" on the sign-in screen to set a new password themselves.`);
 }
 
-function describe(user) {
+function describe(db, user) {
   const when = new Date(user.createdAt).toISOString().slice(0, 10);
-  const canvases = readDb().canvases.filter((c) => c.ownerId === user.id).length;
-  const ownKey = readDb().aiKeys?.some((row) => row.userId === user.id);
+  const canvases = db.canvases.filter((c) => c.ownerId === user.id).length;
+  const ownKey = db.aiKeys?.some((row) => row.userId === user.id);
   return [
     user.email.padEnd(32),
     `joined ${when}`,
@@ -39,11 +39,12 @@ function describe(user) {
 }
 
 if (command === 'list') {
-  const { users } = readDb();
+  const db = await readDb();
+  const { users } = db;
   if (users.length === 0) {
     console.log('No accounts yet. The first person to sign up gets one.');
   } else {
-    for (const user of users) console.log(describe(user));
+    for (const user of users) console.log(describe(db, user));
     console.log(`\n${users.length} account${users.length === 1 ? '' : 's'}.`);
   }
 } else if (command === 'code') {
@@ -51,12 +52,12 @@ if (command === 'list') {
     console.error('Which account? npm run accounts code someone@example.com');
     process.exit(1);
   }
-  const user = findUserByEmail(argument);
+  const user = await findUserByEmail(argument);
   if (!user) {
     console.error(`No account for ${argument}. Run "npm run accounts list" to see them all.`);
     process.exit(1);
   }
-  const code = issueRecoveryCode(user.id);
+  const code = await issueRecoveryCode(user.id);
   console.log(`New recovery code for ${user.email}:\n\n    ${code}\n`);
   console.log('Any previous code for this account no longer works.');
   console.log('They enter it under "Forgot your password?" and choose their own new password.');

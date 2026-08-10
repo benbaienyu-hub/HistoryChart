@@ -9,7 +9,14 @@ import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { handleApiRequest } from '../server/api.js';
 import { resetThrottleForTests } from '../server/accounts.js';
-import { setDataPathForTests } from '../server/store.js';
+import { mutate, resetStoreForTests, setDataPathForTests, usePostgresForTests } from '../server/store.js';
+import { resetFileStorageForTests } from '../server/fileStorage.js';
+import { resetSecretCacheForTests } from '../server/secretBox.js';
+
+// The same suite runs against either backend. Set TEST_POSTGRES_URL and every test
+// below is exercised against a real Postgres — which is the only way to know the
+// app works there, rather than knowing that the store's own unit tests pass.
+const POSTGRES_URL = process.env.TEST_POSTGRES_URL;
 
 let server;
 let base;
@@ -28,15 +35,41 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${server.address().port}`;
 });
 
-afterAll(() => new Promise((resolve) => server.close(resolve)));
+afterAll(async () => {
+  await resetStoreForTests();
+  await new Promise((resolve) => server.close(resolve));
+});
 
-beforeEach(() => {
+beforeEach(async () => {
+  // The uploads directory hangs off the data file, so a temp one is needed either
+  // way — with Postgres the document lives in the database and only image bytes
+  // land here.
   dir = mkdtempSync(join(tmpdir(), 'lacuna-api-'));
-  setDataPathForTests(join(dir, 'db.json'));
+  resetFileStorageForTests();
+  resetSecretCacheForTests();
+
+  if (POSTGRES_URL) {
+    // No writable path for a key file in this mode, which is exactly the situation
+    // on a serverless host: the secret has to come from the environment.
+    process.env.LACUNA_SECRET = 'test-secret-not-a-real-one';
+    // Image bytes still need a directory; only the document moved.
+    process.env.LACUNA_UPLOADS = join(dir, 'uploads');
+    usePostgresForTests(POSTGRES_URL);
+    await mutate((db) => {
+      for (const key of ['users', 'sessions', 'canvases', 'grants', 'images', 'reviews', 'aiKeys']) {
+        db[key] = [];
+      }
+    });
+  } else {
+    delete process.env.LACUNA_SECRET;
+    delete process.env.LACUNA_UPLOADS;
+    setDataPathForTests(join(dir, 'db.json'));
+  }
   resetThrottleForTests();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  if (POSTGRES_URL) await resetStoreForTests();
   rmSync(dir, { recursive: true, force: true });
 });
 

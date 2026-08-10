@@ -54,14 +54,17 @@ describe('normalizeSubtopics', () => {
   });
 });
 
-describe('when the dev server is unreachable', () => {
+describe('when the server is unreachable', () => {
   // fetch rejects only when the request never reached a server. The browser calls
   // that "Failed to fetch", which surfaced verbatim and read like an AI failure.
-  it('says what is actually wrong, and how to check', async () => {
+  it('says what is actually wrong, and that it is not an AI problem', async () => {
     const stub = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
     const error = await expandTopic({ topic: 'Ethiopia' }).catch((e) => e);
 
-    expect(error.message).toMatch(/npm run dev/);
+    expect(error.message).toMatch(/could not reach the server/i);
+    // The point of the message: name the real cause. It deliberately no longer
+    // assumes a dev server on this machine — the app can be deployed.
+    expect(error.message).toMatch(/connection problem, not an AI one/);
     expect(error.message).not.toMatch(/^Failed to fetch$/);
     expect(stub).toHaveBeenCalled();
   });
