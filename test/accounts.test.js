@@ -7,20 +7,26 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   clearAttempts,
+  clearRecoveryCode,
   createSession,
   createUser,
   destroySession,
+  destroySessionsForUser,
   findUserByEmail,
+  generateRecoveryCode,
   hashPassword,
   isValidEmail,
+  issueRecoveryCode,
   normalizeEmail,
   passwordProblem,
   publicUser,
   recordFailedAttempt,
   resetThrottleForTests,
+  setPassword,
   tooManyAttempts,
   userForToken,
   verifyPassword,
+  verifyRecoveryCode,
 } from '../server/accounts.js';
 import { readDb, setDataPathForTests } from '../server/store.js';
 
@@ -106,9 +112,25 @@ describe('users', () => {
 
   it('keeps the hash and salt out of what the client sees', () => {
     // The one place this could leak is a careless spread of the user row, so the
-    // allowlist is asserted rather than the denylist.
+    // allowlist is asserted rather than the denylist. Adding a field here should
+    // take a deliberate edit to this line — including the recovery-code flag,
+    // which is a fact about the account and not the code itself.
     const user = createUser({ email: 'a@b.co', password: 'longenough' });
-    expect(Object.keys(publicUser(user)).sort()).toEqual(['createdAt', 'email', 'id', 'name']);
+    expect(Object.keys(publicUser(user)).sort()).toEqual([
+      'createdAt',
+      'email',
+      'hasRecoveryCode',
+      'id',
+      'name',
+    ]);
+  });
+
+  it('reports whether a recovery code exists, never the code or its hash', () => {
+    const user = createUser({ email: 'a@b.co', password: 'longenough' });
+    expect(publicUser(user).hasRecoveryCode).toBe(false);
+    issueRecoveryCode(user.id);
+    expect(publicUser(findUserByEmail('a@b.co')).hasRecoveryCode).toBe(true);
+    expect(JSON.stringify(publicUser(findUserByEmail('a@b.co')))).not.toContain('recoveryHash');
   });
 
   it('publicUser tolerates nothing being signed in', () => {
@@ -160,6 +182,122 @@ describe('sessions', () => {
     const phone = createSession(user.id).token;
     destroySession(laptop);
     expect(userForToken(phone)?.id).toBe(user.id);
+  });
+
+  it('can end every session for one user without touching anyone else', () => {
+    const mine = createUser({ email: 'a@b.co', password: 'longenough' });
+    const theirs = createUser({ email: 'c@d.co', password: 'longenough' });
+    const laptop = createSession(mine.id).token;
+    const phone = createSession(mine.id).token;
+    const other = createSession(theirs.id).token;
+
+    destroySessionsForUser(mine.id);
+    expect(userForToken(laptop)).toBeNull();
+    expect(userForToken(phone)).toBeNull();
+    expect(userForToken(other)?.id).toBe(theirs.id);
+  });
+
+  it('can spare the session doing the asking', () => {
+    // Changing your password must not sign you out of the page you changed it on.
+    const user = createUser({ email: 'a@b.co', password: 'longenough' });
+    const here = createSession(user.id).token;
+    const elsewhere = createSession(user.id).token;
+
+    destroySessionsForUser(user.id, { except: here });
+    expect(userForToken(here)?.id).toBe(user.id);
+    expect(userForToken(elsewhere)).toBeNull();
+  });
+});
+
+describe('recovery codes', () => {
+  it('issues a code of the documented shape', () => {
+    const code = generateRecoveryCode();
+    expect(code).toMatch(/^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}(-[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{5}){3}$/);
+  });
+
+  it('never issues the same code twice', () => {
+    const seen = new Set();
+    for (let i = 0; i < 200; i++) seen.add(generateRecoveryCode());
+    expect(seen.size).toBe(200);
+  });
+
+  it('leaves out the characters people misread', () => {
+    // The whole alphabet is exercised over enough draws for this to be meaningful.
+    const drawn = new Set([...Array(200)].map(generateRecoveryCode).join(''));
+    for (const confusable of ['I', 'L', 'O', '0', '1']) {
+      expect(drawn.has(confusable), confusable).toBe(false);
+    }
+  });
+
+  it('stores the code the way a password is stored, not in the clear', () => {
+    const user = createUser({ email: 'a@b.co', password: 'longenough' });
+    const code = issueRecoveryCode(user.id);
+    const stored = findUserByEmail('a@b.co');
+    expect(stored.recoveryHash).toBeTruthy();
+    expect(stored.recoveryHash).not.toContain(code.replace(/-/g, ''));
+    expect(JSON.stringify(stored)).not.toContain(code.replace(/-/g, ''));
+  });
+
+  it('accepts the code however it was retyped', () => {
+    const user = createUser({ email: 'a@b.co', password: 'longenough' });
+    const code = issueRecoveryCode(user.id);
+    const stored = findUserByEmail('a@b.co');
+    for (const variant of [
+      code,
+      code.toLowerCase(),
+      code.replace(/-/g, ''),
+      code.replace(/-/g, ' '),
+      `  ${code}  `,
+    ]) {
+      expect(verifyRecoveryCode(stored, variant), variant).toBe(true);
+    }
+  });
+
+  it('rejects a wrong code, an empty one, and an account that has none', () => {
+    const user = createUser({ email: 'a@b.co', password: 'longenough' });
+    const code = issueRecoveryCode(user.id);
+    const stored = findUserByEmail('a@b.co');
+    expect(verifyRecoveryCode(stored, generateRecoveryCode())).toBe(false);
+    expect(verifyRecoveryCode(stored, '')).toBe(false);
+    expect(verifyRecoveryCode(null, code)).toBe(false);
+
+    clearRecoveryCode(user.id);
+    expect(verifyRecoveryCode(findUserByEmail('a@b.co'), code)).toBe(false);
+  });
+
+  it('replaces the old code when a new one is issued', () => {
+    const user = createUser({ email: 'a@b.co', password: 'longenough' });
+    const first = issueRecoveryCode(user.id);
+    const second = issueRecoveryCode(user.id);
+    const stored = findUserByEmail('a@b.co');
+    expect(verifyRecoveryCode(stored, first)).toBe(false);
+    expect(verifyRecoveryCode(stored, second)).toBe(true);
+  });
+});
+
+describe('setting a password', () => {
+  it('replaces the hash and the salt together', () => {
+    const user = createUser({ email: 'a@b.co', password: 'longenough' });
+    // Copied, not referenced: readDb hands back the live row, so holding onto it
+    // would mean comparing the new salt against itself.
+    const before = { ...findUserByEmail('a@b.co') };
+
+    setPassword(user.id, 'a whole new password');
+    const after = findUserByEmail('a@b.co');
+
+    expect(after.passwordSalt).not.toBe(before.passwordSalt);
+    expect(verifyPassword('a whole new password', {
+      hash: after.passwordHash,
+      salt: after.passwordSalt,
+    })).toBe(true);
+    expect(verifyPassword('longenough', {
+      hash: after.passwordHash,
+      salt: after.passwordSalt,
+    })).toBe(false);
+  });
+
+  it('does nothing for an id that isn’t there', () => {
+    expect(() => setPassword('no-such-user', 'longenough')).not.toThrow();
   });
 });
 

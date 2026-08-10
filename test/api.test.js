@@ -683,3 +683,303 @@ describe('review schedules', () => {
     expect((await ben.call('GET', '/api/reviews')).json.reviews).toEqual({});
   });
 });
+
+describe('recovery codes and getting back in', () => {
+  it('hands out a recovery code once, at sign-up', async () => {
+    const ben = client();
+    const { json } = await ben.call('POST', '/api/auth/register', {
+      email: 'ben@example.com',
+      password: 'longenough1',
+    });
+    expect(json.recoveryCode).toMatch(/^[A-Z0-9]{5}(-[A-Z0-9]{5}){3}$/);
+    expect(json.user.hasRecoveryCode).toBe(true);
+
+    // And never again from a route that just reports who you are.
+    const me = await ben.call('GET', '/api/auth/me');
+    expect(me.json.recoveryCode).toBeUndefined();
+    expect(JSON.stringify(me.json)).not.toContain(json.recoveryCode.replace(/-/g, ''));
+  });
+
+  it('resets a forgotten password with the code, and signs the person in', async () => {
+    const ben = client();
+    const { json: signup } = await ben.call('POST', '/api/auth/register', {
+      email: 'ben@example.com',
+      password: 'the old one',
+    });
+
+    // A different browser: the person is locked out and has only the code.
+    const stranger = client();
+    const { status, json } = await stranger.call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: signup.recoveryCode,
+      password: 'a brand new password',
+    });
+    expect(status).toBe(200);
+    expect(json.user.email).toBe('ben@example.com');
+    expect(stranger.cookie).toBeTruthy();
+    expect((await stranger.call('GET', '/api/canvases')).status).toBe(200);
+
+    // The old password is gone and the new one works.
+    const check = client();
+    expect((await check.call('POST', '/api/auth/login', {
+      email: 'ben@example.com',
+      password: 'the old one',
+    })).status).toBe(401);
+    expect((await check.call('POST', '/api/auth/login', {
+      email: 'ben@example.com',
+      password: 'a brand new password',
+    })).status).toBe(200);
+  });
+
+  it('ends the sessions that knew the old password', async () => {
+    // Otherwise a reset does not lock anyone out, which is most of the point.
+    const ben = client();
+    const { json: signup } = await ben.call('POST', '/api/auth/register', {
+      email: 'ben@example.com',
+      password: 'the old one',
+    });
+    expect((await ben.call('GET', '/api/canvases')).status).toBe(200);
+
+    const stranger = client();
+    await stranger.call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: signup.recoveryCode,
+      password: 'a brand new password',
+    });
+
+    expect((await ben.call('GET', '/api/canvases')).status).toBe(401);
+  });
+
+  it('spends the code, and issues a fresh one so nobody is left locked out', async () => {
+    const ben = client();
+    const { json: signup } = await ben.call('POST', '/api/auth/register', {
+      email: 'ben@example.com',
+      password: 'longenough1',
+    });
+
+    const first = await client().call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: signup.recoveryCode,
+      password: 'second password',
+    });
+    expect(first.json.recoveryCode).toBeTruthy();
+    expect(first.json.recoveryCode).not.toBe(signup.recoveryCode);
+
+    // The spent code is dead.
+    resetThrottleForTests();
+    const reuse = await client().call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: signup.recoveryCode,
+      password: 'third password',
+    });
+    expect(reuse.status).toBe(401);
+
+    // The new one works.
+    const again = await client().call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: first.json.recoveryCode,
+      password: 'third password',
+    });
+    expect(again.status).toBe(200);
+  });
+
+  it('gives the same answer for a wrong code and an account that does not exist', async () => {
+    // Otherwise this endpoint reports who has an account here.
+    const { json: signup } = await client().call('POST', '/api/auth/register', {
+      email: 'ben@example.com',
+      password: 'longenough1',
+    });
+    const wrongCode = await client().call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: 'K7QFX-M2XRT-9BWHD-CJ4NP',
+      password: 'a new password',
+    });
+    resetThrottleForTests();
+    const noAccount = await client().call('POST', '/api/auth/reset', {
+      email: 'nobody@example.com',
+      code: signup.recoveryCode,
+      password: 'a new password',
+    });
+    expect(wrongCode.status).toBe(401);
+    expect(noAccount.status).toBe(401);
+    expect(wrongCode.json.error).toBe(noAccount.json.error);
+  });
+
+  it('rejects a malformed code before looking at the account, and a weak new password', async () => {
+    const { json: signup } = await client().call('POST', '/api/auth/register', {
+      email: 'ben@example.com',
+      password: 'longenough1',
+    });
+    const malformed = await client().call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: 'nope',
+      password: 'a new password',
+    });
+    expect(malformed.status).toBe(400);
+    expect(malformed.json.error).toMatch(/recovery code/i);
+
+    resetThrottleForTests();
+    const weak = await client().call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: signup.recoveryCode,
+      password: 'short',
+    });
+    expect(weak.status).toBe(400);
+    expect(weak.json.error).toMatch(/8/);
+  });
+
+  it('stops answering after enough wrong codes', async () => {
+    await signedUp('ben@example.com');
+    const attacker = client();
+    for (let i = 0; i < 10; i++) {
+      await attacker.call('POST', '/api/auth/reset', {
+        email: 'ben@example.com',
+        code: 'K7QFX-M2XRT-9BWHD-CJ4NP',
+        password: 'a new password',
+      });
+    }
+    const { status } = await attacker.call('POST', '/api/auth/reset', {
+      email: 'ben@example.com',
+      code: 'K7QFX-M2XRT-9BWHD-CJ4NP',
+      password: 'a new password',
+    });
+    expect(status).toBe(429);
+  });
+
+  it('re-issues a code for someone signed in, but only with their password', async () => {
+    const ben = await signedUp('ben@example.com');
+    const refused = await ben.call('POST', '/api/account/recovery-code', { password: 'wrong' });
+    expect(refused.status).toBe(401);
+
+    const { status, json } = await ben.call('POST', '/api/account/recovery-code', {
+      password: 'longenough1',
+    });
+    expect(status).toBe(200);
+    expect(json.recoveryCode).toMatch(/^[A-Z0-9]{5}(-[A-Z0-9]{5}){3}$/);
+  });
+
+  it('needs a session to re-issue a code at all', async () => {
+    await signedUp('ben@example.com');
+    const { status } = await client().call('POST', '/api/account/recovery-code', {
+      password: 'longenough1',
+    });
+    expect(status).toBe(401);
+  });
+});
+
+describe('changing a password', () => {
+  it('changes it, keeps this session, and drops the others', async () => {
+    const laptop = await signedUp('ben@example.com');
+    const phone = client();
+    await phone.call('POST', '/api/auth/login', {
+      email: 'ben@example.com',
+      password: 'longenough1',
+    });
+    expect((await phone.call('GET', '/api/canvases')).status).toBe(200);
+
+    const { status } = await laptop.call('POST', '/api/account/password', {
+      currentPassword: 'longenough1',
+      newPassword: 'a much better password',
+    });
+    expect(status).toBe(200);
+
+    // Still signed in here — signing you out of the page you used to change it
+    // would be a bug, not security.
+    expect((await laptop.call('GET', '/api/canvases')).status).toBe(200);
+    // Gone everywhere else.
+    expect((await phone.call('GET', '/api/canvases')).status).toBe(401);
+  });
+
+  it('refuses without the current password, or with a weak new one', async () => {
+    const ben = await signedUp('ben@example.com');
+    expect((await ben.call('POST', '/api/account/password', {
+      currentPassword: 'not it',
+      newPassword: 'a much better password',
+    })).status).toBe(401);
+    expect((await ben.call('POST', '/api/account/password', {
+      currentPassword: 'longenough1',
+      newPassword: 'short',
+    })).status).toBe(400);
+
+    // The password did not change on either failed attempt.
+    expect((await client().call('POST', '/api/auth/login', {
+      email: 'ben@example.com',
+      password: 'longenough1',
+    })).status).toBe(200);
+  });
+});
+
+describe('an account’s own AI key', () => {
+  const KEY = 'sk-proj-abcdefghijklmnopqrstuvwxyz0123456789ABCD';
+
+  it('starts with nothing saved', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { status, json } = await ben.call('GET', '/api/account/ai');
+    expect(status).toBe(200);
+    expect(json.own).toMatchObject({ configured: false });
+  });
+
+  it('saves a key and never hands it back', async () => {
+    const ben = await signedUp('ben@example.com');
+    const saved = await ben.call('PUT', '/api/account/ai', {
+      apiKey: KEY,
+      baseUrl: 'https://api.groq.com/openai/v1',
+      model: 'llama-3.3-70b-versatile',
+    });
+    expect(saved.status).toBe(200);
+    expect(saved.json.own).toMatchObject({
+      configured: true,
+      preview: 'sk-…ABCD',
+      baseUrl: 'https://api.groq.com/openai/v1',
+      model: 'llama-3.3-70b-versatile',
+    });
+    expect(JSON.stringify(saved.json)).not.toContain(KEY);
+
+    const read = await ben.call('GET', '/api/account/ai');
+    expect(JSON.stringify(read.json)).not.toContain(KEY);
+  });
+
+  it('changes the model without being re-sent the key', async () => {
+    const ben = await signedUp('ben@example.com');
+    await ben.call('PUT', '/api/account/ai', { apiKey: KEY, model: 'gpt-4o' });
+    const { json } = await ben.call('PUT', '/api/account/ai', { apiKey: '', model: 'gpt-4o-mini' });
+    expect(json.own).toMatchObject({ configured: true, model: 'gpt-4o-mini', preview: 'sk-…ABCD' });
+  });
+
+  it('asks for a key when there is nothing stored to keep', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { status, json } = await ben.call('PUT', '/api/account/ai', { model: 'gpt-4o' });
+    expect(status).toBe(400);
+    expect(json.error).toMatch(/Paste an API key/);
+  });
+
+  it('refuses a provider URL that would put the key on the wire in the clear', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { status, json } = await ben.call('PUT', '/api/account/ai', {
+      apiKey: KEY,
+      baseUrl: 'http://example.com/v1',
+    });
+    expect(status).toBe(400);
+    expect(json.error).toMatch(/https/);
+  });
+
+  it('forgets the key when asked', async () => {
+    const ben = await signedUp('ben@example.com');
+    await ben.call('PUT', '/api/account/ai', { apiKey: KEY });
+    const { json } = await ben.call('DELETE', '/api/account/ai');
+    expect(json.own).toMatchObject({ configured: false });
+  });
+
+  it('is per account: one person’s key is invisible to another', async () => {
+    const ben = await signedUp('ben@example.com');
+    await ben.call('PUT', '/api/account/ai', { apiKey: KEY });
+    const mia = await signedUp('mia@example.com');
+    expect((await mia.call('GET', '/api/account/ai')).json.own).toMatchObject({ configured: false });
+  });
+
+  it('needs a session', async () => {
+    expect((await client().call('GET', '/api/account/ai')).status).toBe(401);
+    expect((await client().call('PUT', '/api/account/ai', { apiKey: KEY })).status).toBe(401);
+    expect((await client().call('DELETE', '/api/account/ai')).status).toBe(401);
+  });
+});

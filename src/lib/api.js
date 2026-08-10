@@ -47,8 +47,11 @@ async function request(method, path, body, options = {}) {
 
 // --- session ---------------------------------------------------------------
 
+// Resolves to the user *and* the recovery code, because sign-up is the only
+// moment the code exists in the clear — a caller that drops it has thrown away
+// the account's way back in.
 export function register({ email, name, password }) {
-  return request('POST', '/api/auth/register', { email, name, password }).then((r) => r.user);
+  return request('POST', '/api/auth/register', { email, name, password });
 }
 
 export function logIn({ email, password }) {
@@ -63,6 +66,40 @@ export function logOut() {
 // normal state, not an error, so this never throws for that.
 export function fetchCurrentUser() {
   return request('GET', '/api/auth/me').then((r) => r.user ?? null);
+}
+
+// --- getting back in, and staying independent -------------------------------
+
+// Signs the person in on success, and returns a replacement code: the one they
+// just used is spent.
+export function resetPassword({ email, code, password }) {
+  return request('POST', '/api/auth/reset', { email, code, password });
+}
+
+export function changePassword({ currentPassword, newPassword }) {
+  return request('POST', '/api/account/password', { currentPassword, newPassword }).then(
+    (r) => r.user
+  );
+}
+
+export function newRecoveryCode(password) {
+  return request('POST', '/api/account/recovery-code', { password }).then((r) => r.recoveryCode);
+}
+
+// --- this account's own AI key ---------------------------------------------
+
+export function fetchAiSettings() {
+  return request('GET', '/api/account/ai');
+}
+
+// An empty `apiKey` means "keep the stored key, change the rest" — the browser is
+// never given the key, so it cannot send it back.
+export function saveAiSettings({ apiKey, baseUrl, model }) {
+  return request('PUT', '/api/account/ai', { apiKey, baseUrl, model });
+}
+
+export function clearAiSettings() {
+  return request('DELETE', '/api/account/ai');
 }
 
 // --- canvases --------------------------------------------------------------

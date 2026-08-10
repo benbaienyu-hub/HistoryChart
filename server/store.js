@@ -24,6 +24,8 @@ const EMPTY = {
   images: [],
   // Spaced-repetition state, one row per user per block — see reviewRoutes.js.
   reviews: [],
+  // Each account's own AI credential, encrypted — see aiKeys.js.
+  aiKeys: [],
 };
 
 let dataPath = process.env.LACUNA_DATA || DEFAULT_PATH;

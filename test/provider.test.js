@@ -400,3 +400,54 @@ describe('isFormatUnsupported', () => {
     expect(isFormatUnsupported(undefined)).toBe(false);
   });
 });
+
+// Per-account keys, proved on the wire rather than at the seam: the stub records
+// the Authorization header, which is the only thing that settles whose key was
+// actually spent.
+describe('an account’s own key', () => {
+  it('is the one sent, not the server’s', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'the-owners-key');
+    await generateKnowledge(
+      { topic: 'Ethiopia' },
+      { apiKey: 'the-guests-key', baseUrl, model: 'stub-model', source: 'user' }
+    );
+    expect(received).toHaveLength(1);
+    expect(received[0].auth).toBe('Bearer the-guests-key');
+  });
+
+  it('reaches the account’s own provider, not the server’s', async () => {
+    // The owner points at OpenAI; the guest's own credential says otherwise, and
+    // the request must follow the guest.
+    vi.stubEnv('OPENAI_BASE_URL', '');
+    await generateKnowledge(
+      { topic: 'Ethiopia' },
+      { apiKey: 'the-guests-key', baseUrl, model: 'guest-model', source: 'user' }
+    );
+    expect(received[0].body.model).toBe('guest-model');
+  });
+
+  it('falls back to the server’s configuration when no credential is passed', async () => {
+    vi.stubEnv('OPENAI_API_KEY', 'the-owners-key');
+    vi.stubEnv('OPENAI_BASE_URL', baseUrl);
+    vi.stubEnv('OPENAI_MODEL', 'stub-model');
+    await generateKnowledge({ topic: 'Ethiopia' });
+    expect(received[0].auth).toBe('Bearer the-owners-key');
+  });
+
+  it('refuses to call anything when own-key mode leaves it with no key', async () => {
+    await expect(
+      generateKnowledge(
+        { topic: 'Ethiopia' },
+        { apiKey: null, source: 'none', requiresOwnKey: true }
+      )
+    ).rejects.toMatchObject({ code: 'NO_API_KEY', requiresOwnKey: true });
+    expect(received).toHaveLength(0);
+  });
+
+  it('will not guess a model for an account that named a provider without one', async () => {
+    await expect(
+      generateKnowledge({ topic: 'Ethiopia' }, { apiKey: 'k', baseUrl, model: null, source: 'user' })
+    ).rejects.toMatchObject({ code: 'CONFIG' });
+    expect(received).toHaveLength(0);
+  });
+});

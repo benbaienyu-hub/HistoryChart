@@ -61,6 +61,13 @@ POST /api/auth/register     create an account, and sign in
 POST /api/auth/login        email + password
 POST /api/auth/logout       invalidates the session server-side
 GET  /api/auth/me           who is signed in, if anyone
+POST /api/auth/reset        email + recovery code + new password
+
+POST   /api/account/password        current + new password
+POST   /api/account/recovery-code   issue a replacement (needs the password)
+GET    /api/account/ai              what this account has saved, masked
+PUT    /api/account/ai              save a key / provider / model
+DELETE /api/account/ai              forget it
 
 GET    /api/canvases            { owned, shared }
 POST   /api/canvases            create
@@ -72,10 +79,16 @@ POST   /api/canvases/:id/unshare  { email }
 ```
 
 **Passwords** are hashed with scrypt and a per-user salt, compared in constant time,
-and never leave the server — `publicUser()` is an allowlist of four fields, so
-leaking a hash would take a deliberate mistake. Sign-in is throttled to ten attempts
-per address per fifteen minutes, and answers identically for a wrong password and a
-non-existent account, so the endpoint can't be used to find out who has one.
+and never leave the server — `publicUser()` is an allowlist, so leaking a hash would
+take a deliberate mistake. Sign-in is throttled to ten attempts per address per
+fifteen minutes, and answers identically for a wrong password and a non-existent
+account, so the endpoint can't be used to find out who has one. Changing a password
+ends every *other* session but keeps the one that made the change.
+
+**Recovery codes** are the way back in without email — issued at sign-up, hashed the
+same way a password is, single-use, and replaced immediately when spent. The reset
+endpoint is throttled separately from sign-in and gives one answer for "wrong code"
+and "no such account". See *Using it independently of you*.
 
 **The session** is a 32-byte random token in an `HttpOnly`, `SameSite=Lax` cookie,
 with `Secure` set automatically once the request arrives over https. HttpOnly is the
@@ -143,11 +156,53 @@ server doesn't care, and correctly marks the session cookie `Secure` once it see
 Then: send them the address, have them press **Create one** and register with the
 email you'll share canvases to, and your canvases reach them under *Shared with me*.
 
-Three things to know before handing out the URL:
+Two things to know before handing out the URL:
 
-- **They spend your AI quota.** Everyone on your server shares one `OPENAI_API_KEY`, and Groq's free tier is rate-limited — two people generating a Detailed graph at the same moment can hit a 429.
-- **There is no password reset.** If they forget theirs, the only fix is editing `.data/lacuna.json` by hand.
+- **They share your AI quota by default.** Everyone on your server falls back to one `OPENAI_API_KEY`, and Groq's free tier is rate-limited — two people generating a Detailed graph at the same moment can hit a 429. They can add a key of their own instead; see below.
 - **Their notes live on your machine.** Fine for a friend who knows that; worth saying rather than letting them assume otherwise.
+
+### Using it independently of you
+
+Someone else on your server shouldn't have to come to you to keep using it. Two
+things used to make them dependent, and neither does now.
+
+**A forgotten password.** Every account is issued a **recovery code** at sign-up —
+20 characters, shown once, hashed at rest exactly like a password. *Forgot your
+password?* on the sign-in screen takes the email, that code, and a new password;
+it signs them in, ends every session that knew the old password, and issues a
+replacement code, because the one they used is spent. There is no email out of
+this app, so a code they keep is the substitute for a reset link. They can also
+generate a fresh one any time from **Account** (their initial, top right), which
+invalidates the old one.
+
+If someone loses both their password *and* their code, that is the one case that
+still needs you — but it needs a command, not a text editor:
+
+```bash
+npm run accounts list                     # who's on this server
+npm run accounts code them@example.com    # issue them a fresh recovery code
+```
+
+Hand them the code over something you trust; they set their own new password with
+it. The script deliberately cannot set a password — that would mean you knowing it.
+
+**Your AI key.** Each account can save its own key, provider URL and model under
+**Account → AI key**, and its requests then use that instead of the server's. The
+key is encrypted before it is stored (AES-256-GCM, with the key in
+`.data/secret.key`, mode 0600, or `LACUNA_SECRET` if you'd rather keep it in the
+environment) and is never sent back to the browser — the settings screen only ever
+shows the last four characters. There are one-click presets for OpenAI and Groq's
+free tier.
+
+Sharing your key is a perfectly reasonable way to run this, and it is what happens
+if nobody does anything. If you'd rather the server never spend your key on other
+people, set `LACUNA_REQUIRE_OWN_KEY=1` — then an account with no key of its own
+gets AI features switched off, with a message saying to add one, instead of a bill
+addressed to you. It is off unless you set it.
+
+Back up `.data/secret.key` alongside `.data/lacuna.json`. Restoring the database
+without it leaves the saved keys unreadable — the app says so plainly and asks
+people to paste theirs again, rather than pretending they still work.
 
 ## Business plan
 
@@ -556,7 +611,13 @@ hardcode white or black and both themes stay in sync.
 | `src/components/BlockImages.jsx` | The image strip and the add-image button |
 | `server/images.js` | Upload storage, format rules, and cleanup |
 | `server/api.js` | The API router, mounted by both the dev and the production server |
-| `server/accounts.js` | Password hashing, sessions, sign-in throttling |
+| `server/accounts.js` | Password hashing, sessions, recovery codes, sign-in throttling |
+| `src/lib/recoveryCode.js` | The recovery-code format, shared by the issuer and the form |
+| `src/components/AccountSettings.jsx` | Password, recovery code, and this account's AI key |
+| `server/aiConfig.js` | Which key pays for a request — the account's own, or the server's |
+| `server/aiKeys.js` | Per-account AI credentials, encrypted at rest |
+| `server/secretBox.js` | AES-256-GCM for the few stored values that are secrets |
+| `scripts/accounts.mjs` | `npm run accounts` — the owner's backstop for a lost code |
 | `server/canvasRoutes.js` | Canvas CRUD, share grants, permission checks |
 | `server/store.js` | The JSON data store, written atomically |
 | `server/index.mjs` | The standalone server — `npm start` |
@@ -576,11 +637,18 @@ holding markup and state wiring.
 
 ## Known limitations
 
-Auth and sharing are **local-only**. Sign-in is a profile picker with no
-password and no server, and sharing grants access to another profile *in the
-same browser* — no invite email is sent. Both need a real backend
-(`src/lib/auth.js` and `src/lib/share.js` are the modules to replace); canvases
-live in `localStorage`, so they don't sync across devices.
+- **No email.** Nothing is ever sent: no invite mail, no reset link. Sharing works
+  by granting an email address access, and the recipient sees the canvas the next
+  time they sign in — you have to tell them yourself. Password recovery uses a code
+  the account holder keeps (see *Using it independently of you*).
+- **One JSON file.** The store is a single file rewritten atomically on each save.
+  Right for tens of accounts, not for hundreds of concurrent writers; `readDb` and
+  `mutate` in `server/store.js` are the two functions a real database would replace.
+- **No sub-block permissions.** A share covers a whole canvas — view or edit —
+  and there is no per-block visibility.
+- **Encryption at rest covers stored AI keys, not notes.** The keys are encrypted
+  because they are immediately spendable by anyone who reads the file. Notes are
+  not; treat the server as trusted infrastructure.
 
 ## Scripts
 
@@ -591,6 +659,7 @@ npm run preview  # serve the build — no AI route, see Deploying
 npm run lint     # oxlint
 npm test         # vitest, single run
 npm run check-key   # diagnose an OPENAI_API_KEY that isn't working
+npm run accounts    # list accounts, or issue someone a fresh recovery code
 npm start           # serve the built app + API from one Node process
 npm run demo        # dev server in offline mode — no key, no network, no bill
 npm run logo        # regenerate public/*.svg from the shared mark geometry

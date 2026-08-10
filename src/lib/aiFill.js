@@ -8,21 +8,31 @@
 
 const ENDPOINT = '/api/knowledge';
 
-let configuredPromise = null;
+// Cached because most pages ask more than once, but not for the lifetime of the
+// tab: whether AI works now depends on whether *this account* has a key, and
+// saving one in settings has to be able to turn the feature on without a reload.
+let statusPromise = null;
+
+export function fetchAiStatus() {
+  if (!statusPromise) {
+    statusPromise = fetch('/api/knowledge-status')
+      .then((res) => (res.ok ? res.json() : { configured: false }))
+      .catch(() => ({ configured: false }));
+  }
+  return statusPromise;
+}
+
+export function forgetAiStatus() {
+  statusPromise = null;
+}
 
 export function isAiConfigured() {
-  if (!configuredPromise) {
-    configuredPromise = fetch('/api/knowledge-status')
-      .then((res) => (res.ok ? res.json() : { configured: false }))
-      .then((body) => Boolean(body.configured))
-      .catch(() => false);
-  }
-  return configuredPromise;
+  return fetchAiStatus().then((body) => Boolean(body.configured));
 }
 
 const PLACEHOLDER = {
-  summary: 'Connect an OpenAI API key to generate a real summary here.',
-  correction: 'Connect an OpenAI API key to fact-check these notes.',
+  summary: 'Connect an API key to generate a real summary here.',
+  correction: 'Connect an API key to fact-check these notes.',
   subtopics: [{ label: 'Suggested subtopic (connect AI)', detail: '' }],
 };
 

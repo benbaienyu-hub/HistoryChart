@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check-key": "node scripts/check-key.mjs",
+    "accounts": "node scripts/accounts.mjs",
     "logo": "node scripts/build-logo.mjs",
     "demo": "OPENAI_MOCK=1 vite"
   },

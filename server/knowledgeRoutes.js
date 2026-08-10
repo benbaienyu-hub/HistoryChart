@@ -2,15 +2,37 @@ import { readFileSync } from 'node:fs';
 import OpenAI from 'openai';
 import { parseEnv } from '../scripts/keyDiagnostics.js';
 import { splitPoints } from '../src/lib/deck.js';
+import {
+  DEFAULT_MODEL,
+  configProblem,
+  credentialProblem,
+  credentialsForUser,
+  mockEnabled,
+  readBaseUrl,
+  readModel,
+  requireOwnKey,
+  serverCredentials,
+} from './aiConfig.js';
+import { currentUser } from './authRoutes.js';
 
 // Server-side only. The API key must never reach the browser, so every model
 // call goes through this module — it is mounted into the Vite dev server (see
 // vite.config.js) and is deliberately framework-agnostic so the same handler
 // can back an Express route or a serverless function in production.
 
-// Overridable so you can change models without editing code. If this default
-// has aged out and you get a "model not found" error, set OPENAI_MODEL in .env.
-const DEFAULT_MODEL = 'gpt-4o';
+// Where the settings come from lives in aiConfig.js; re-exported here because
+// this module was their address first, and both the tests and `npm run check-key`
+// still ask it for them.
+export {
+  configProblem,
+  credentialsForUser,
+  hasApiKey,
+  mockEnabled,
+  readBaseUrl,
+  requireOwnKey,
+  serverCredentials,
+  setEnvFileForTests,
+} from './aiConfig.js';
 
 // Structured outputs guarantee the response parses, so the client never has to
 // cope with prose where it expected JSON. `correction` is a plain string ('' for
@@ -85,16 +107,8 @@ export function isKnownLevel(level) {
   return Object.hasOwn(LEVEL_GUIDANCE, level);
 }
 
-// Offline mode: OPENAI_MOCK=1 makes every route answer with deterministic sample
-// content and never contact OpenAI. It exists so the graph generator can be
-// exercised end to end — in tests, in a browser, or in a live demo — without a
-// key, a network, or a bill. Every summary it produces is prefixed so it can
-// never be mistaken for real output.
-export function mockEnabled() {
-  const value = envValue('OPENAI_MOCK')?.toLowerCase();
-  return value === '1' || value === 'true';
-}
-
+// Every mock summary is prefixed so offline sample content can never be mistaken
+// for real output. See mockEnabled in aiConfig.js for the switch itself.
 const MOCK_ASPECTS = [
   'origins',
   'key figures',
@@ -163,73 +177,6 @@ This matters more than it looks: each point becomes one card in the user's revis
 For "subtopics", suggest specific things worth a block of their own, not vague categories. Skip anything already on the canvas. Give each one a short label; its "detail" points are shown to the user as the starting content of that block, so they must say something, not merely restate the label.
 
 Never pad the list to reach a count. Some topics support many sub-topics and some support two; returning the honest number is always better than filling space.`;
-
-// Settings resolve from the real environment first, then from .env directly.
-//
-// Vite copies .env into process.env once, at startup (see vite.config.js), so
-// editing .env while the dev server runs used to change nothing until a restart
-// — and the resulting error said "OPENAI_MODEL is not set" while the file plainly
-// set it. Reading the file as a fallback removes that trap. Precedence is
-// unchanged: a real environment variable still wins, which is Vite's rule.
-let envFilePath = new URL('../.env', import.meta.url);
-
-// Test seam. The fallback reads a real file, which would otherwise make the test
-// suite depend on whatever .env happens to be sitting on disk. Pass null to turn
-// the fallback off entirely.
-export function setEnvFileForTests(path) {
-  envFilePath = path;
-}
-
-function envValue(name) {
-  const fromProcess = process.env[name]?.trim();
-  if (fromProcess) return fromProcess;
-  if (!envFilePath) return null;
-  try {
-    return parseEnv(readFileSync(envFilePath, 'utf8'))[name]?.trim() || null;
-  } catch {
-    // No .env, or unreadable. In production there may legitimately not be one.
-    return null;
-  }
-}
-
-function readKey() {
-  return envValue('OPENAI_API_KEY');
-}
-
-function readModel() {
-  return envValue('OPENAI_MODEL') ?? DEFAULT_MODEL;
-}
-
-// Point the app at any OpenAI-compatible provider. Several have free tiers, and
-// a local Ollama needs no key at all, so this is the escape hatch when OpenAI
-// credits run out. Unset means OpenAI itself, exactly as before.
-//
-// The provider must support JSON-schema structured outputs; the route relies on
-// them so the client never has to parse prose. Support varies, so if a provider
-// rejects the schema the route surfaces its error rather than guessing.
-export function readBaseUrl() {
-  return envValue('OPENAI_BASE_URL')?.replace(/\/+$/, '') || null;
-}
-
-// A model name is provider-specific. Defaulting to gpt-4o is right for OpenAI and
-// nonsense for anything else, so when a custom provider is configured without a
-// model we refuse to guess — otherwise the first request fails with "gpt-4o isn't
-// available", which reads like a key problem and isn't.
-export function configProblem() {
-  if (readBaseUrl() && !envValue('OPENAI_MODEL')) {
-    return (
-      `OPENAI_BASE_URL is set to ${readBaseUrl()} but OPENAI_MODEL is not set. ` +
-      'A model name is specific to its provider, so there is no sensible default here. ' +
-      'Run `npm run check-key` — it lists the models that provider offers — then put one ' +
-      'in OPENAI_MODEL in .env. The file is re-read on each request, so that takes effect immediately.'
-    );
-  }
-  return null;
-}
-
-export function hasApiKey() {
-  return readKey() !== null;
-}
 
 // Does .env itself define a key? Used only to tell the user, on a 401, whether
 // a shell variable is shadowing their file — the most confusing failure here.
@@ -380,27 +327,39 @@ function shapeResult(parsed, maxSubtopics) {
   };
 }
 
-export async function generateKnowledge({ topic, notes, childLabels, level, context, maxSubtopics }) {
+// `credentials` says whose key to spend (see credentialsForUser). Omitted, it
+// falls back to the server's own configuration, which is what every caller that
+// isn't an HTTP request wants.
+export async function generateKnowledge(
+  { topic, notes, childLabels, level, context, maxSubtopics },
+  credentials
+) {
   if (mockEnabled())
     return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL, context, maxSubtopics });
 
-  const problem = configProblem();
+  const creds = credentials ?? serverCredentials({ evenWithoutKey: true });
+
+  const problem = credentialProblem(creds);
   if (problem) {
     const error = new Error(problem);
     error.code = 'CONFIG';
     throw error;
   }
 
-  const apiKey = readKey();
-  if (!apiKey) {
-    const error = new Error('OPENAI_API_KEY is not set');
+  if (!creds.apiKey) {
+    const error = new Error(
+      creds.requiresOwnKey
+        ? 'This server requires each account to use its own API key.'
+        : 'OPENAI_API_KEY is not set'
+    );
     error.code = 'NO_API_KEY';
+    error.requiresOwnKey = Boolean(creds.requiresOwnKey);
     throw error;
   }
 
-  const baseURL = readBaseUrl();
+  const { apiKey, baseUrl: baseURL } = creds;
   const client = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
-  const model = readModel();
+  const model = creds.model ?? DEFAULT_MODEL;
 
   const prompt = buildPrompt({ topic, notes, childLabels, level, context, maxSubtopics });
   const remembered = workingTierByModel.get(model);
@@ -475,11 +434,30 @@ function send(res, status, payload) {
 // answer this identically — the client uses it to decide whether the AI features
 // are available at all.
 export function handleKnowledgeStatus(req, res) {
+  if (mockEnabled()) {
+    send(res, 200, {
+      configured: true,
+      model: 'offline sample data',
+      provider: 'offline',
+      mock: true,
+      keySource: 'mock',
+      requiresOwnKey: false,
+    });
+    return;
+  }
+
+  // Whose key answers this visitor's requests, which is not the same question as
+  // whether the server has one: with own-key mode on, a signed-in guest without a
+  // key of their own has no AI at all, and the UI needs to say so rather than
+  // offering buttons that will fail.
+  const credentials = credentialsForUser(currentUser(req));
   send(res, 200, {
-    configured: hasApiKey() || mockEnabled(),
-    model: mockEnabled() ? 'offline sample data' : readModel(),
-    provider: mockEnabled() ? 'offline' : (readBaseUrl() ?? 'openai'),
-    mock: mockEnabled(),
+    configured: Boolean(credentials.apiKey),
+    model: credentials.model ?? readModel(),
+    provider: credentials.baseUrl ?? 'openai',
+    mock: false,
+    keySource: credentials.source,
+    requiresOwnKey: requireOwnKey(),
   });
 }
 
@@ -508,20 +486,35 @@ export async function handleKnowledgeRequest(req, res) {
   // usable answer.
   const level = isKnownLevel(body.level) ? body.level : DEFAULT_LEVEL;
 
+  // Resolved once, so the error branches below can report the credential that
+  // actually failed rather than re-reading the environment and describing a key
+  // the request never used.
+  const credentials = credentialsForUser(currentUser(req));
+  const ownKey = credentials.source === 'user';
+
   try {
-    const result = await generateKnowledge({
-      topic,
-      notes: typeof body.notes === 'string' ? body.notes : '',
-      childLabels: Array.isArray(body.childLabels) ? body.childLabels : [],
-      level,
-      context: normalizeContext(body.context),
-      maxSubtopics: normalizeMaxSubtopics(body.maxSubtopics),
-    });
+    const result = await generateKnowledge(
+      {
+        topic,
+        notes: typeof body.notes === 'string' ? body.notes : '',
+        childLabels: Array.isArray(body.childLabels) ? body.childLabels : [],
+        level,
+        context: normalizeContext(body.context),
+        maxSubtopics: normalizeMaxSubtopics(body.maxSubtopics),
+      },
+      credentials
+    );
     send(res, 200, result);
   } catch (error) {
     if (error.code === 'NO_API_KEY') {
       // 503 is the signal the client uses to fall back to placeholder mode.
-      send(res, 503, { error: 'No API key configured', code: 'NO_API_KEY' });
+      send(res, 503, {
+        error: error.requiresOwnKey
+          ? 'This server asks everyone to bring their own API key. Add yours in account settings.'
+          : 'No API key configured',
+        code: 'NO_API_KEY',
+        requiresOwnKey: Boolean(error.requiresOwnKey),
+      });
       return;
     }
     if (error.code === 'CONFIG') {
@@ -538,33 +531,45 @@ export async function handleKnowledgeRequest(req, res) {
     if (error.status === 401) {
       // A bare "401" is the least actionable message this route can produce, so
       // report what the process is actually holding — never the key itself.
-      const key = readKey() ?? '';
-      const baseURL = readBaseUrl();
-      const fromShell = Boolean(process.env.OPENAI_API_KEY) && !readEnvFileKey();
+      const key = credentials.apiKey ?? '';
+      const baseURL = credentials.baseUrl;
+      const fromShell =
+        !ownKey && Boolean(process.env.OPENAI_API_KEY) && !readEnvFileKey();
       console.error(
         [
-          '[knowledge] 401 — OpenAI rejected the key.',
+          '[knowledge] 401 — the provider rejected the key.',
           `  length: ${key.length}`,
           `  starts: ${JSON.stringify(key.slice(0, 8))}`,
-          `  source: ${fromShell ? 'shell environment (this overrides .env)' : '.env or shell'}`,
+          `  source: ${
+            ownKey
+              ? "this account's own key, saved in account settings"
+              : fromShell
+                ? 'shell environment (this overrides .env)'
+                : '.env or shell'
+          }`,
           `  provider: ${baseURL ?? 'api.openai.com (default)'}`,
           `  suspicious: ${describeKeyFaults(key, { expectOpenAiKey: !baseURL }) || 'nothing obvious'}`,
-          '  Run `npm run check-key` for a definitive answer.',
+          ownKey ? '  Ask them to paste it again.' : '  Run `npm run check-key` for a definitive answer.',
         ].join('\n')
       );
       send(res, 502, {
-        error:
-          'OpenAI rejected the API key. Run `npm run check-key` in the project folder — it will say exactly why.',
+        error: ownKey
+          ? 'Your provider rejected your API key. Open account settings and paste it again — ' +
+            'and check the provider URL matches where the key is from.'
+          : 'OpenAI rejected the API key. Run `npm run check-key` in the project folder — it will say exactly why.',
       });
       return;
     }
     if (error.status === 404) {
-      const where = readBaseUrl() ?? 'OpenAI';
-      console.error(`[knowledge] 404 — ${where} has no model "${readModel()}".`);
+      const where = credentials.baseUrl ?? 'OpenAI';
+      const model = credentials.model ?? readModel();
+      console.error(`[knowledge] 404 — ${where} has no model "${model}".`);
       send(res, 502, {
-        error:
-          `${where} has no model called "${readModel()}". Run \`npm run check-key\` to list the ` +
-          'models it does offer, and put one in OPENAI_MODEL in .env.',
+        error: ownKey
+          ? `${where} has no model called "${model}". Change the Model field in your account settings ` +
+            'to one your provider offers.'
+          : `${where} has no model called "${model}". Run \`npm run check-key\` to list the ` +
+            'models it does offer, and put one in OPENAI_MODEL in .env.',
       });
       return;
     }

@@ -3,6 +3,12 @@
 
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 import { mutate, readDb } from './store.js';
+import {
+  RECOVERY_ALPHABET,
+  RECOVERY_LENGTH,
+  formatRecoveryCode,
+  normalizeRecoveryCode,
+} from '../src/lib/recoveryCode.js';
 
 export const SESSION_COOKIE = 'lacuna_session';
 const SESSION_DAYS = 30;
@@ -47,9 +53,17 @@ export function passwordProblem(password) {
 
 // What the client is allowed to see about a user. Never the hash or the salt —
 // this function exists so that leaking them takes a deliberate mistake.
+// `hasRecoveryCode` is a fact about the account, not a secret: the settings screen
+// needs it to tell someone they have no way back in yet.
 export function publicUser(user) {
   if (!user) return null;
-  return { id: user.id, email: user.email, name: user.name, createdAt: user.createdAt };
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    createdAt: user.createdAt,
+    hasRecoveryCode: Boolean(user.recoveryHash),
+  };
 }
 
 export function findUserByEmail(email) {
@@ -110,6 +124,81 @@ export function destroySession(token) {
   if (!token) return;
   mutate((db) => {
     db.sessions = db.sessions.filter((s) => s.token !== token);
+  });
+}
+
+// Every session but (optionally) the one doing the asking. A password change or a
+// recovery has to end the sessions somebody else might be holding, or the change
+// achieves nothing.
+export function destroySessionsForUser(userId, { except } = {}) {
+  mutate((db) => {
+    db.sessions = db.sessions.filter((s) => s.userId !== userId || s.token === except);
+  });
+}
+
+// --- passwords and recovery codes ------------------------------------------
+
+export function setPassword(userId, password) {
+  const { hash, salt } = hashPassword(password);
+  mutate((db) => {
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return;
+    user.passwordHash = hash;
+    user.passwordSalt = salt;
+    user.passwordChangedAt = Date.now();
+  });
+}
+
+// Rejection sampling rather than `byte % 31`: the remainder would make the first
+// few letters of the alphabet slightly likelier, and there is no reason to accept
+// a biased secret when discarding a few bytes is free.
+export function generateRecoveryCode() {
+  const limit = 256 - (256 % RECOVERY_ALPHABET.length);
+  let code = '';
+  while (code.length < RECOVERY_LENGTH) {
+    for (const byte of randomBytes(RECOVERY_LENGTH)) {
+      if (byte >= limit) continue;
+      code += RECOVERY_ALPHABET[byte % RECOVERY_ALPHABET.length];
+      if (code.length === RECOVERY_LENGTH) break;
+    }
+  }
+  return formatRecoveryCode(code);
+}
+
+// Returns the code in the clear exactly once — this is the only moment it exists
+// outside the user's own notes. It is stored the same way a password is, so a
+// leaked database does not hand over a way in.
+export function issueRecoveryCode(userId) {
+  const code = generateRecoveryCode();
+  const { hash, salt } = hashPassword(normalizeRecoveryCode(code));
+  mutate((db) => {
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return;
+    user.recoveryHash = hash;
+    user.recoverySalt = salt;
+    user.recoveryIssuedAt = Date.now();
+  });
+  return code;
+}
+
+export function verifyRecoveryCode(user, code) {
+  if (!user?.recoveryHash) return false;
+  return verifyPassword(normalizeRecoveryCode(code), {
+    hash: user.recoveryHash,
+    salt: user.recoverySalt,
+  });
+}
+
+// One code, one use. Clearing it on use means a code read over someone's shoulder
+// stops being a spare key the moment it is spent — the reset flow immediately
+// issues a fresh one, so nobody is left without a way back in.
+export function clearRecoveryCode(userId) {
+  mutate((db) => {
+    const user = db.users.find((u) => u.id === userId);
+    if (!user) return;
+    delete user.recoveryHash;
+    delete user.recoverySalt;
+    delete user.recoveryIssuedAt;
   });
 }
 

@@ -78,6 +78,9 @@ function App() {
     <Home
       user={user}
       onOpenCanvas={openCanvas}
+      // Settings can change the user row (a first recovery code, a new password),
+      // and the header reads from it, so the change has to come back up here.
+      onUserChanged={setUser}
       onSignOut={async () => {
         await logOut().catch(() => {});
         setOpenCanvasId(null);

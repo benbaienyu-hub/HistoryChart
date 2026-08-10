@@ -13,6 +13,7 @@ import { buildTemplateGraph, listTemplates } from '../lib/templates';
 import { countDue } from '../lib/review';
 import Logo from './Logo';
 import ShareDialog from './ShareDialog';
+import AccountSettings from './AccountSettings';
 import ThemeToggle from './ThemeToggle';
 
 const NODE_W = 280;
@@ -332,7 +333,8 @@ function NoMatches({ query, onClear, elsewhere, onGo }) {
   );
 }
 
-export default function Home({ user, onOpenCanvas, onSignOut }) {
+export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [library, setLibrary] = useState({ owned: [], shared: [] });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -501,9 +503,25 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
         <div className="flex items-center gap-2 sm:gap-3">
           <ThemeToggle />
           <span className="hidden text-[12.5px] text-subink sm:block">{user.email}</span>
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-[12px] font-semibold text-accent">
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            title="Account settings"
+            className="flex h-7 w-7 items-center justify-center rounded-full bg-accent/10 text-[12px] font-semibold text-accent hover:bg-accent/20"
+          >
             {user.name.charAt(0).toUpperCase()}
-          </span>
+          </button>
+          {/* An account with no recovery code has no way back in, and the person
+              has no reason to go looking for the setting. Say so where they are. */}
+          {!user.hasRecoveryCode && (
+            <button
+              type="button"
+              onClick={() => setSettingsOpen(true)}
+              className="hidden rounded-full border border-warn-line bg-warn-bg px-3 py-1.5 text-[12.5px] text-ink sm:block"
+            >
+              Set a recovery code
+            </button>
+          )}
           <button
             type="button"
             onClick={onSignOut}
@@ -790,6 +808,14 @@ export default function Home({ user, onOpenCanvas, onSignOut }) {
             </div>
           </motion.div>
         </div>
+      )}
+
+      {settingsOpen && (
+        <AccountSettings
+          user={user}
+          onUserChanged={onUserChanged}
+          onClose={() => setSettingsOpen(false)}
+        />
       )}
     </div>
   );

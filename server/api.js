@@ -2,7 +2,21 @@
 // server and the standalone production server (server/index.mjs) without a second
 // wiring path that could drift.
 
-import { currentUser, handleLogin, handleLogout, handleMe, handleRegister } from './authRoutes.js';
+import {
+  currentUser,
+  handleChangePassword,
+  handleLogin,
+  handleLogout,
+  handleMe,
+  handleNewRecoveryCode,
+  handleRegister,
+  handleResetPassword,
+} from './authRoutes.js';
+import {
+  handleDeleteAiSettings,
+  handleGetAiSettings,
+  handleSaveAiSettings,
+} from './accountRoutes.js';
 import {
   handleCreate,
   handleDelete,
@@ -29,6 +43,13 @@ const ROUTES = [
   { method: 'POST', path: '/api/auth/login', handler: handleLogin },
   { method: 'POST', path: '/api/auth/logout', handler: handleLogout },
   { method: 'GET', path: '/api/auth/me', handler: handleMe },
+  { method: 'POST', path: '/api/auth/reset', handler: handleResetPassword },
+
+  { method: 'POST', path: '/api/account/password', handler: handleChangePassword, auth: true },
+  { method: 'POST', path: '/api/account/recovery-code', handler: handleNewRecoveryCode, auth: true },
+  { method: 'GET', path: '/api/account/ai', handler: handleGetAiSettings, auth: true },
+  { method: 'PUT', path: '/api/account/ai', handler: handleSaveAiSettings, auth: true },
+  { method: 'DELETE', path: '/api/account/ai', handler: handleDeleteAiSettings, auth: true },
 
   { method: 'GET', path: '/api/canvases', handler: handleList, auth: true },
   { method: 'POST', path: '/api/canvases', handler: handleCreate, auth: true },
