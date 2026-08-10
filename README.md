@@ -115,8 +115,39 @@ npm start          # PORT=8080 to change the port
 
 `npm start` serves the built app and the API from one Node process, so the cookie
 works with no CORS setup. **Put it behind HTTPS** — the cookie only sets `Secure`
-when the request arrives over https, so a plain-http deployment would send sessions
-in the clear.
+when the request arrives over https (directly or via `x-forwarded-proto`), so a
+plain-http deployment would send sessions in the clear.
+
+**Whatever you deploy to needs a persistent disk.** Accounts, canvases, and uploaded
+images are files, so a host with an ephemeral filesystem — most serverless platforms,
+including Vercel and Netlify — silently wipes every account on each deploy. Use a
+small VM, or a PaaS with a mounted volume and `LACUNA_DATA` pointed at it.
+
+### Letting someone else use it
+
+The app is already multi-user; the only question is how they reach your server.
+
+| | How | Good for |
+| --- | --- | --- |
+| **Same wifi** | `npm run dev -- --host`, then give them the `Network:` URL it prints | Sitting next to each other. Your laptop has to stay awake, and passwords cross the network unencrypted — fine at home, not on school wifi |
+| **A temporary public URL** | `npm run build && npm start`, then a tunnel (`cloudflared tunnel --url http://localhost:5173`) | Letting a friend try it tonight from anywhere. HTTPS, so passwords are encrypted |
+| **Real hosting** | `npm run build && npm start` on a small VM or a PaaS with a volume | Anything ongoing |
+| **Their own copy** | They clone the repo and run it with their own key | If they're technical. Note that you then can't share canvases — separate servers, separate accounts |
+
+**Use `npm start`, not `npm run dev`, for anything but the same-wifi case.** The dev
+server rejects requests arriving under a hostname it doesn't recognise — a tunnel
+domain gets *"Blocked request. This host is not allowed."* — while the production
+server doesn't care, and correctly marks the session cookie `Secure` once it sees
+`x-forwarded-proto: https`.
+
+Then: send them the address, have them press **Create one** and register with the
+email you'll share canvases to, and your canvases reach them under *Shared with me*.
+
+Three things to know before handing out the URL:
+
+- **They spend your AI quota.** Everyone on your server shares one `OPENAI_API_KEY`, and Groq's free tier is rate-limited — two people generating a Detailed graph at the same moment can hit a 429.
+- **There is no password reset.** If they forget theirs, the only fix is editing `.data/lacuna.json` by hand.
+- **Their notes live on your machine.** Fine for a friend who knows that; worth saying rather than letting them assume otherwise.
 
 ## Business plan
 
