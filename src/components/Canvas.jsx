@@ -8,7 +8,7 @@ import RelationDialog from './RelationDialog';
 import GraphLevelMenu from './GraphLevelMenu';
 import BlockDetail from './BlockDetail';
 import StudyMode from './StudyMode';
-import { expandTopic, fillKnowledge, isAiConfigured } from '../lib/aiFill';
+import { describeAiStatus, expandTopic, fetchAiStatus, fillKnowledge } from '../lib/aiFill';
 import {
   ApiError,
   deleteImage,
@@ -132,7 +132,10 @@ function CanvasEditor({ user, record, onExit }) {
   const [pendingRelation, setPendingRelation] = useState(null);
   const [editingRelation, setEditingRelation] = useState(null);
   const [studying, setStudying] = useState(false);
-  const [aiReady, setAiReady] = useState(false);
+  // The whole status, not just a boolean: the button's tooltip has to say *why*
+  // AI is unavailable, and "no key at all" and "this server wants your own key"
+  // have different fixes.
+  const [aiStatus, setAiStatus] = useState(null);
   const [graphProgress, setGraphProgress] = useState(null);
   const [levelMenuOpen, setLevelMenuOpen] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
@@ -143,15 +146,30 @@ function CanvasEditor({ user, record, onExit }) {
   const dotColor = theme === 'dark' ? 'rgba(255,255,255,0.13)' : 'rgba(0,0,0,0.12)';
   const maskColor = theme === 'dark' ? 'rgba(23,23,26,0.72)' : 'rgba(245,245,247,0.7)';
 
+  // Re-checked on focus, not just at mount. Whether AI works can change while this
+  // page sits open — a key added to the server and deployed, or one saved by this
+  // account in another tab — and the old code cached the answer for the lifetime of
+  // the tab, so it went on claiming there was no key until a full reload.
   useEffect(() => {
     let active = true;
-    isAiConfigured().then((ready) => {
-      if (active) setAiReady(ready);
-    });
+    const check = (force) => {
+      fetchAiStatus(force ? { force: true } : undefined).then((status) => {
+        if (active) setAiStatus(status);
+      });
+    };
+
+    check(false);
+    const onFocus = () => check(true);
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onFocus);
     return () => {
       active = false;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onFocus);
     };
   }, []);
+
+  const aiReady = Boolean(aiStatus?.configured);
 
   // What React Flow actually renders: collapsed subtrees marked hidden, plus
   // per-node child/hidden counts for the collapse control.
@@ -812,6 +830,22 @@ function CanvasEditor({ user, record, onExit }) {
         continue;
       }
 
+      // Placeholders are not an answer, and quietly writing them into somebody's
+      // notes looks like the AI produced nonsense. Say what the server said —
+      // "no key configured" and "bring your own" need different actions — and
+      // leave the notes alone.
+      if (result.placeholder) {
+        // Resolved before the update, because the updater passed to setNodes is
+        // not async.
+        const why = result.reason ?? describeAiStatus(await fetchAiStatus());
+        setNodes((prev) =>
+          prev.map((n) =>
+            n.id === root.id ? { ...n, data: { ...n.data, aiCorrection: why } } : n
+          )
+        );
+        continue;
+      }
+
       setNodes((prev) =>
         prev.map((n) =>
           n.id === root.id
@@ -831,6 +865,9 @@ function CanvasEditor({ user, record, onExit }) {
       appendSuggestions(root.id, result.suggestedSubtopics);
     }
 
+    // The status may have changed underneath this run — a 503 clears the cache —
+    // so refresh the indicator rather than leaving it saying what it said before.
+    fetchAiStatus({ force: true }).then(setAiStatus);
     setIsFilling(false);
   }
 
@@ -1126,11 +1163,7 @@ function CanvasEditor({ user, record, onExit }) {
           type="button"
           onClick={handleFillKnowledge}
           disabled={isFilling || nodes.length === 0}
-          title={
-            aiReady
-              ? 'Review notes with AI and suggest what’s missing'
-              : 'No OPENAI_API_KEY set — will insert placeholders. See .env.example'
-          }
+          title={describeAiStatus(aiStatus)}
           className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isFilling ? 'Thinking…' : '✨ Fill my knowledge'}

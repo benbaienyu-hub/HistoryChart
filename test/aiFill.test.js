@@ -1,5 +1,20 @@
-import { describe, expect, it, vi } from 'vitest';
-import { expandTopic, normalizeSubtopics } from '../src/lib/aiFill';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  describeAiStatus,
+  expandTopic,
+  fetchAiStatus,
+  fillKnowledge,
+  forgetAiStatus,
+  isAiConfigured,
+  normalizeSubtopics,
+} from '../src/lib/aiFill';
+
+// The status is cached in module scope, so it has to be cleared between tests or
+// one test's answer becomes the next test's assumption.
+afterEach(() => {
+  vi.restoreAllMocks();
+  forgetAiStatus();
+});
 
 // Sub-topics gained a per-item `detail` when the third level of a generated
 // graph started arriving with content. This guards the boundary: whatever the
@@ -84,5 +99,130 @@ describe('when the server is unreachable', () => {
     });
     const error = await expandTopic({ topic: 'Ethiopia' }).catch((e) => e);
     expect(error.message).toBe('Groq has no model called "nope".');
+  });
+});
+
+describe('the cached AI status', () => {
+  // The bug this replaced: the status was memoised for the lifetime of the tab, so
+  // a key added on the server (or by this account in another tab) left the app
+  // insisting there was no key until a full page reload.
+  beforeEach(() => {
+    forgetAiStatus();
+  });
+
+  it('asks once for repeated questions in quick succession', async () => {
+    const stub = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ configured: true }), { status: 200 }));
+
+    await Promise.all([fetchAiStatus(), fetchAiStatus(), isAiConfigured()]);
+    expect(stub).toHaveBeenCalledTimes(1);
+  });
+
+  it('asks again when forced, so a saved key takes effect without a reload', async () => {
+    const stub = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ configured: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ configured: true }), { status: 200 }));
+
+    expect(await isAiConfigured()).toBe(false);
+    expect(await isAiConfigured({ force: true })).toBe(true);
+    expect(stub).toHaveBeenCalledTimes(2);
+  });
+
+  it('asks again once the cached answer is stale', async () => {
+    vi.useFakeTimers();
+    try {
+      const stub = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(new Response(JSON.stringify({ configured: false }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ configured: true }), { status: 200 }));
+
+      expect(await isAiConfigured()).toBe(false);
+      vi.advanceTimersByTime(31_000);
+      expect(await isAiConfigured()).toBe(true);
+      expect(stub).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('never lets the browser answer from its own cache', async () => {
+    const stub = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({ configured: true }), { status: 200 }));
+    await fetchAiStatus();
+    expect(stub.mock.calls[0][1]).toMatchObject({ cache: 'no-store' });
+  });
+
+  it('treats an unreachable server as "no AI", not as a crash', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new TypeError('Failed to fetch'));
+    expect(await isAiConfigured()).toBe(false);
+  });
+
+  it('drops the cached answer when a request comes back 503', async () => {
+    // The server has just said there is no usable key; whatever we believed at page
+    // load is out of date either way.
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(JSON.stringify({ configured: true }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: 'No API key configured', code: 'NO_API_KEY' }), {
+          status: 503,
+        })
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ configured: false }), { status: 200 }));
+
+    expect(await isAiConfigured()).toBe(true);
+    const filled = await fillKnowledge({ topic: 'Rome', notes: '' });
+    expect(filled.placeholder).toBe(true);
+    // Not forced, and well inside the TTL — it re-asks because the 503 invalidated it.
+    expect(await isAiConfigured()).toBe(false);
+  });
+
+  it('carries the server’s explanation, so the fix named is the right one', async () => {
+    // A fresh Response per call: a body can only be read once, and reusing one
+    // makes the second request look like a server that answered nothing.
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            error:
+              'This server asks everyone to bring their own API key. Add yours in account settings.',
+            code: 'NO_API_KEY',
+            requiresOwnKey: true,
+          }),
+          { status: 503 }
+        )
+    );
+    const filled = await fillKnowledge({ topic: 'Rome', notes: '' });
+    expect(filled.reason).toMatch(/bring their own API key/);
+    const expanded = await expandTopic({ topic: 'Rome' });
+    expect(expanded.reason).toMatch(/bring their own API key/);
+  });
+});
+
+describe('describeAiStatus', () => {
+  it('does not tell a hosted user to read .env.example', () => {
+    // It used to. On a deployment there is no .env to look at, and the person
+    // reading it may not be the person who owns the server.
+    const message = describeAiStatus({ configured: false });
+    expect(message).not.toMatch(/\.env/);
+    expect(message).toMatch(/Account → AI key/);
+    expect(message).toMatch(/OPENAI_API_KEY/);
+  });
+
+  it('names the own-key rule when that is the reason', () => {
+    expect(describeAiStatus({ configured: false, requiresOwnKey: true })).toMatch(
+      /their own API key/
+    );
+  });
+
+  it('says whose key is being spent when it is yours', () => {
+    expect(describeAiStatus({ configured: true, keySource: 'user' })).toMatch(/your own API key/);
+    expect(describeAiStatus({ configured: true, keySource: 'server' })).not.toMatch(/your own/);
+  });
+
+  it('does not claim anything before the answer arrives', () => {
+    expect(describeAiStatus(null)).toMatch(/Checking/);
   });
 });

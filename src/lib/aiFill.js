@@ -8,26 +8,56 @@
 
 const ENDPOINT = '/api/knowledge';
 
-// Cached because most pages ask more than once, but not for the lifetime of the
-// tab: whether AI works now depends on whether *this account* has a key, and
-// saving one in settings has to be able to turn the feature on without a reload.
-let statusPromise = null;
+// Cached, because several components ask — but only briefly. Whether AI works can
+// change underneath a page that is already open: a key added to the server and
+// deployed, or a key saved by this account in another tab. Memoising the answer for
+// the lifetime of the tab meant the app kept insisting there was no key long after
+// there was one, with a full reload as the only cure. That was a real bug.
+const STATUS_TTL_MS = 30_000;
+const UNAVAILABLE = { configured: false };
 
-export function fetchAiStatus() {
-  if (!statusPromise) {
-    statusPromise = fetch('/api/knowledge-status')
-      .then((res) => (res.ok ? res.json() : { configured: false }))
-      .catch(() => ({ configured: false }));
+let cached = null;
+
+export function fetchAiStatus({ force = false } = {}) {
+  const fresh = cached && !force && Date.now() - cached.at < STATUS_TTL_MS;
+  if (!fresh) {
+    cached = {
+      at: Date.now(),
+      // Cache-busted: this answer changes with deployment configuration, and a
+      // conditional request served from cache would defeat the whole point.
+      promise: fetch('/api/knowledge-status', { cache: 'no-store' })
+        .then((res) => (res.ok ? res.json() : UNAVAILABLE))
+        .catch(() => UNAVAILABLE),
+    };
   }
-  return statusPromise;
+  return cached.promise;
 }
 
 export function forgetAiStatus() {
-  statusPromise = null;
+  cached = null;
 }
 
-export function isAiConfigured() {
-  return fetchAiStatus().then((body) => Boolean(body.configured));
+export function isAiConfigured(options) {
+  return fetchAiStatus(options).then((body) => Boolean(body.configured));
+}
+
+// What to tell someone about the state of their AI access. Kept here, next to the
+// status shape, rather than inline in a component: the wording is the useful part,
+// and it needs to be right for a hosted deployment as well as a local checkout.
+export function describeAiStatus(status) {
+  if (!status) return 'Checking whether an AI key is available…';
+  if (status.configured) {
+    return status.keySource === 'user'
+      ? 'Review notes with AI and suggest what’s missing — using your own API key'
+      : 'Review notes with AI and suggest what’s missing';
+  }
+  if (status.requiresOwnKey) {
+    return 'This server asks everyone to use their own API key. Add yours under Account → AI key.';
+  }
+  return (
+    'No AI key connected, so this will insert placeholders. Add your own under ' +
+    'Account → AI key, or set OPENAI_API_KEY on the server and redeploy.'
+  );
 }
 
 const PLACEHOLDER = {
@@ -56,7 +86,14 @@ async function requestKnowledge({ topic, notes, childLabels, level, context, max
   }
 
   if (response.status === 503) {
-    return { ...PLACEHOLDER, placeholder: true };
+    // The server just told us there is no usable key, which may be news — drop the
+    // cached status so the next check reflects reality rather than what we assumed
+    // when the page loaded.
+    forgetAiStatus();
+    const detail = await response.json().catch(() => ({}));
+    // Carry the server's own explanation. "No key" and "this server wants you to
+    // bring your own" have different fixes, and the client cannot tell them apart.
+    return { ...PLACEHOLDER, placeholder: true, reason: detail.error ?? null };
   }
   if (!response.ok) {
     const detail = await response.json().catch(() => ({}));
@@ -94,6 +131,7 @@ export async function expandTopic({ topic, level, context, maxSubtopics }) {
     summary: result.summary ?? '',
     subtopics: normalizeSubtopics(result.subtopics),
     placeholder: Boolean(result.placeholder),
+    reason: result.reason ?? null,
     refused: Boolean(result.refused),
   };
 }
@@ -110,6 +148,7 @@ export async function fillKnowledge({ topic, notes, childLabels }) {
     correction: result.correction || null,
     suggestedSubtopics: normalizeSubtopics(result.subtopics),
     placeholder: Boolean(result.placeholder),
+    reason: result.reason ?? null,
     refused: Boolean(result.refused),
   };
 }
