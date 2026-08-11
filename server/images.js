@@ -53,6 +53,9 @@ export async function saveImage({ canvasId, ownerId, type, name, bytes }) {
   // file is a broken picture in somebody's canvas, which is the worse of the two.
   const stored = await fileStorage().put(image.key, bytes, type);
   if (stored.url) image.url = stored.url;
+  // Recorded so a read knows how to fetch these bytes even if the storage
+  // configuration changes later.
+  if (stored.access) image.access = stored.access;
 
   await mutate((db) => {
     db.images ??= [];

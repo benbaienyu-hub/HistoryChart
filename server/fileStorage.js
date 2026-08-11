@@ -93,42 +93,75 @@ function createBlobStorage(token) {
   // the SDK at all.
   const load = () => import('@vercel/blob');
 
+  // A blob store is created as either private or public and cannot be changed
+  // afterwards, so this has to match whichever the store is. Private is the right
+  // choice — these are somebody's study notes, and a private blob cannot be read
+  // without the token even by someone holding the URL — but a store created public
+  // still has to work.
+  //
+  // Rather than adding a setting nobody would know to change, the access level is
+  // learned: try the preferred one, and if the store disagrees, remember what it
+  // wanted. Same approach as the response-format tiers in knowledgeRoutes.js.
+  let access = process.env.LACUNA_BLOB_ACCESS?.trim() === 'public' ? 'public' : 'private';
+
+  function mismatched(error) {
+    // The API rejects an access level the store does not allow. Matching on the
+    // message is unpleasant, but the SDK gives no code for it, and the fallback is
+    // one retry rather than a wrong answer.
+    const message = String(error?.message ?? '').toLowerCase();
+    return message.includes('access') && (message.includes('store') || message.includes('allow'));
+  }
+
+  async function upload(key, bytes, contentType, level) {
+    const { put } = await load();
+    return put(`lacuna/${key}`, bytes, {
+      token,
+      access: level,
+      contentType,
+      // Our key is already unique, and a random suffix would mean the stored URL
+      // is the only way to find the object again.
+      addRandomSuffix: false,
+    });
+  }
+
   return {
     kind: 'blob',
 
     async put(key, bytes, contentType) {
-      const { put } = await load();
-      const result = await put(`lacuna/${key}`, bytes, {
-        token,
-        // 'public' is the only access level the SDK offers. The URL is a v4 UUID
-        // under a fixed prefix and is never sent to a browser, so it is not a
-        // listing anybody can walk — but it is why the read path stays behind the
-        // permission check rather than redirecting to this URL.
-        access: 'public',
-        contentType,
-        // Our key is already unique, and a random suffix would mean the stored
-        // URL is the only way to find the object again.
-        addRandomSuffix: false,
-      });
-      return { key, url: result.url };
+      let result;
+      try {
+        result = await upload(key, bytes, contentType, access);
+      } catch (error) {
+        if (!mismatched(error)) throw error;
+        const other = access === 'private' ? 'public' : 'private';
+        result = await upload(key, bytes, contentType, other);
+        console.log(`[images] this blob store is ${other}; using that from now on.`);
+        access = other;
+      }
+      // `access` is recorded per image: a store's level cannot change, but a
+      // database can outlive one store, and a read has to know how to fetch.
+      return { key, url: result.url, access };
     },
 
     async get(image) {
-      const response = await fetch(image.url);
-      if (!response.ok) {
-        throw new Error(`Blob storage answered ${response.status} for ${image.key}`);
+      const { get } = await load();
+      const result = await get(image.url ?? `lacuna/${image.key}`, {
+        token,
+        access: image.access ?? access,
+      });
+      if (!result || result.statusCode !== 200 || !result.stream) {
+        throw new Error(`Blob storage had nothing for ${image.key}`);
       }
-      return Buffer.from(await response.arrayBuffer());
+      return Buffer.from(await new Response(result.stream).arrayBuffer());
     },
 
     async remove(image) {
-      if (!image.url) return;
       const { del } = await load();
-      await del(image.url, { token });
+      await del(image.url ?? `lacuna/${image.key}`, { token });
     },
 
     describe() {
-      return 'Vercel Blob';
+      return `Vercel Blob (${access})`;
     },
   };
 }

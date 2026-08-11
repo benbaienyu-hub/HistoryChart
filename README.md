@@ -145,7 +145,7 @@ variable. Nothing else in the app knows which one is in use.
 | | Default | Set this instead | Then it uses |
 | --- | --- | --- | --- |
 | Accounts, canvases, schedules | one JSON file (`LACUNA_DATA`, default `.data/lacuna.json`) | `POSTGRES_URL`, `DATABASE_URL`, their `_NON_POOLING`/`_UNPOOLED` variants, or `PGHOST`+`PGUSER`+`PGDATABASE` | Postgres, as one `jsonb` document in `lacuna_document` |
-| Uploaded images | files in `.data/uploads/` (`LACUNA_UPLOADS` to move them) | `BLOB_READ_WRITE_TOKEN` | Vercel Blob |
+| Uploaded images | files in `.data/uploads/` (`LACUNA_UPLOADS` to move them) | `BLOB_READ_WRITE_TOKEN` | Vercel Blob — create the store **Private** |
 | The key that encrypts stored AI keys | `.data/secret.key`, generated on first use, mode 0600 | `LACUNA_SECRET` | that value (required where there is no writable disk) |
 
 `npm start` prints which of each it is using, and **`GET /api/health`** answers the
@@ -188,8 +188,12 @@ Vercel has no writable disk, so this needs both backends above. `vercel.json` an
    Vite and the `vercel.json`.
 2. In the project's **Storage** tab, add a **Neon** Postgres database (Vercel's own
    Postgres was retired in December 2024; Neon is the marketplace integration) and
-   a **Blob** store. Both set their environment variables for you: `POSTGRES_URL`
-   from Neon, `BLOB_READ_WRITE_TOKEN` from Blob.
+   a **Blob** store — choose **Private** access for the blob store, since these are
+   somebody's notes and a private blob cannot be read with the URL alone. Both set
+   their environment variables for you: `POSTGRES_URL` from Neon,
+   `BLOB_READ_WRITE_TOKEN` from Blob. A store's access level is fixed at creation,
+   so if you already made a public one the app detects that on its first upload and
+   uses it — `LACUNA_BLOB_ACCESS=public` skips the detection.
 3. In **Settings → Environment Variables**, add:
    - `LACUNA_SECRET` — `openssl rand -hex 32`. Without it, saving an AI key fails
      with a message telling you this; there is no disk to keep a generated key on.
