@@ -2,9 +2,15 @@
 // Server-side code: the OpenAI SDK refuses to construct under jsdom, which it
 // treats as a browser and therefore a credential-exposure risk.
 import { Readable } from 'node:stream';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createSession, createUser } from '../server/accounts.js';
+import { setDataPathForTests } from '../server/store.js';
 import {
   buildPrompt,
+  handleKnowledgeStatus,
   formatPoints,
   generateKnowledge,
   handleKnowledgeRequest,
@@ -18,11 +24,14 @@ import {
 import { GRAPH_LEVELS } from '../src/lib/graphLevels.js';
 
 // A minimal stand-in for the (req, res) pair the handler is written against, so
-// the route can be exercised without a server.
-function request(method, body) {
+// the route can be exercised without a server. `cookie` carries the session: the
+// AI routes require one, because an open route backed by the server's key is a free
+// model proxy for anyone who finds it.
+function request(method, body, cookie = sessionCookie) {
   const raw = typeof body === 'string' ? body : JSON.stringify(body);
   const req = Readable.from(raw === undefined ? [] : [raw]);
   req.method = method;
+  req.headers = cookie ? { cookie } : {};
   return req;
 }
 
@@ -42,13 +51,29 @@ function response() {
   return res;
 }
 
-async function call(method, body) {
+async function call(method, body, cookie) {
   const res = response();
-  await handleKnowledgeRequest(request(method, body), res);
+  await handleKnowledgeRequest(request(method, body, cookie), res);
   return { status: res.statusCode, json: res.body ? JSON.parse(res.body) : null, res };
 }
 
-beforeEach(() => {
+async function callStatus(cookie) {
+  const res = response();
+  await handleKnowledgeStatus(request('GET', undefined, cookie), res);
+  return { status: res.statusCode, json: res.body ? JSON.parse(res.body) : null };
+}
+
+let dir;
+let sessionCookie;
+
+beforeEach(async () => {
+  // A real account and session, so the routes' auth check passes and the tests
+  // below are about the AI behaviour rather than about signing in.
+  dir = mkdtempSync(join(tmpdir(), 'lacuna-knowledge-'));
+  setDataPathForTests(join(dir, 'db.json'));
+  const user = await createUser({ email: 'studier@example.com', password: 'longenough1' });
+  sessionCookie = `lacuna_session=${encodeURIComponent((await createSession(user.id)).token)}`;
+
   // The sandbox this runs in may legitimately have a key exported; these tests
   // must never depend on that, and must never make a real API call. Offline mode
   // is cleared too, so the no-key paths below are genuinely exercised.
@@ -57,6 +82,10 @@ beforeEach(() => {
   vi.stubEnv('OPENAI_MOCK', '');
   // Hermetic: ignore any .env on disk, so these assert process.env behaviour.
   setEnvFileForTests(null);
+});
+
+afterEach(() => {
+  rmSync(dir, { recursive: true, force: true });
 });
 
 describe('hasApiKey', () => {
@@ -424,7 +453,51 @@ describe('handleKnowledgeRequest', () => {
     const res = response();
     const req = Readable.from(['x'.repeat(1_000_001)]);
     req.method = 'POST';
+    req.headers = { cookie: sessionCookie };
     await handleKnowledgeRequest(req, res);
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('being signed in', () => {
+  // An AI route open to anonymous callers is a free model proxy for whoever finds
+  // the URL, billed to whoever set the server up. This was open until a public
+  // deployment made that a real exposure rather than a theoretical one.
+  it('refuses the knowledge route without a session', async () => {
+    const { status, json } = await call('POST', { topic: 'Rome' }, null);
+    expect(status).toBe(401);
+    expect(json).toMatchObject({ code: 'SIGN_IN' });
+  });
+
+  it('refuses it before reading the body, so a big anonymous post costs nothing', async () => {
+    const res = response();
+    const req = Readable.from(['x'.repeat(1_000_001)]);
+    req.method = 'POST';
+    req.headers = {};
+    await handleKnowledgeRequest(req, res);
+    expect(res.statusCode).toBe(401);
+  });
+
+  it('refuses the status route without a session', async () => {
+    const { status } = await callStatus(null);
+    expect(status).toBe(401);
+  });
+
+  it('refuses even in offline mode, which is still a route worth not leaving open', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    expect((await callStatus(null)).status).toBe(401);
+    expect((await call('POST', { topic: 'Rome' }, null)).status).toBe(401);
+  });
+
+  it('refuses a session token that is not real', async () => {
+    const { status } = await call('POST', { topic: 'Rome' }, 'lacuna_session=made-up');
+    expect(status).toBe(401);
+  });
+
+  it('answers a signed-in caller', async () => {
+    vi.stubEnv('OPENAI_MOCK', '1');
+    const { status, json } = await callStatus();
+    expect(status).toBe(200);
+    expect(json).toMatchObject({ configured: true, mock: true });
   });
 });

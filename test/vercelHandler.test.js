@@ -77,18 +77,33 @@ describe('the serverless handler', () => {
 
   it('serves the knowledge status route, which is mounted outside the table', async () => {
     const { status, json } = await call('GET', '/api/knowledge-status');
-    expect(status).toBe(200);
-    // No key configured in this test, and no session, so nothing is available —
-    // the point is that the route answered at all.
-    expect(json).toMatchObject({ configured: false });
+    // 401 rather than 404: the route was reached and asked for a session, which is
+    // what proves it is mounted. Both AI routes require one — an open route backed
+    // by the server's key is a free model proxy for anyone who finds it.
+    expect(status).toBe(401);
+    expect(json.code).toBe('SIGN_IN');
   });
 
   it('answers the knowledge route rather than falling through', async () => {
     const { status, json } = await call('POST', '/api/knowledge', { topic: 'Rome' });
-    // 503 is "no key", which is the correct answer here — and proves the request
-    // reached the handler instead of being 404ed by the router.
-    expect(status).toBe(503);
-    expect(json.code).toBe('NO_API_KEY');
+    expect(status).toBe(401);
+    expect(json.code).toBe('SIGN_IN');
+  });
+
+  it('serves the AI routes once there is a session', async () => {
+    const created = await call('POST', '/api/auth/register', {
+      email: 'ben@example.com',
+      password: 'longenough1',
+    });
+    const status = await call('GET', '/api/knowledge-status', undefined, created.cookie);
+    expect(status.status).toBe(200);
+    // No key configured in this test, so nothing is available — the point is that
+    // the route answered.
+    expect(status.json).toMatchObject({ configured: false });
+
+    const knowledge = await call('POST', '/api/knowledge', { topic: 'Rome' }, created.cookie);
+    expect(knowledge.status).toBe(503);
+    expect(knowledge.json.code).toBe('NO_API_KEY');
   });
 
   it('answers JSON for an unknown API path, never HTML', async () => {

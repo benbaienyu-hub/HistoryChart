@@ -164,6 +164,9 @@ describe('the blob backend', () => {
       get: async () => null,
       del: async () => {},
     }));
+    // Without this the dynamic import inside fileStorage resolves the mock
+    // registered in beforeEach, and the override above silently does nothing.
+    vi.resetModules();
     resetFileStorageForTests();
     await expect(fileStorage().put('abc.png', BYTES, 'image/png')).rejects.toThrow(/Too Large/);
   });
@@ -199,6 +202,7 @@ describe('the blob backend', () => {
       get: async () => null,
       del: async () => {},
     }));
+    vi.resetModules();
     resetFileStorageForTests();
     await expect(fileStorage().get({ key: 'missing.png' })).rejects.toThrow(/nothing for missing.png/);
   });

@@ -61,6 +61,7 @@ POST /api/auth/register     create an account, and sign in
 POST /api/auth/login        email + password
 POST /api/auth/logout       invalidates the session server-side
 GET  /api/auth/me           who is signed in, if anyone
+GET  /api/health            can this deployment actually work — no session needed
 POST /api/auth/reset        email + recovery code + new password
 
 POST   /api/account/password        current + new password
@@ -105,6 +106,18 @@ had been copied.
 
 **No invite email is sent.** Sending mail needs an account with a mail provider;
 until then the dialog says so plainly and tells you to pass the word on yourself.
+
+**The AI routes require a session too** (`/api/knowledge` and
+`/api/knowledge-status`, 401 without one). They were open once, on the reasoning
+that being anonymous was survivable there — which stops being true the moment the
+app is reachable by anyone. An unauthenticated route backed by the server's API key
+is a free model proxy for whoever finds the URL, billed to whoever set the server
+up. The session is checked before the request body is read, so an anonymous upload
+of megabytes costs nothing, and `credentialsForUser(null)` returns no credential at
+all as a second lock behind the first.
+
+Note what this is *not*: a limit. Nothing yet caps how much one account can spend
+of a shared key — see *Known limitations*.
 
 ### Where the data lives
 
@@ -729,6 +742,12 @@ holding markup and state wiring.
 - **Encryption at rest covers stored AI keys, not notes.** The keys are encrypted
   because they are immediately spendable by anyone who reads the file. Notes are
   not; treat the server as trusted infrastructure.
+- **No per-account AI quota.** Signing in is required, but a signed-in account can
+  make unlimited requests against a shared `OPENAI_API_KEY`. Fine among people you
+  know; not fine for open signups. Either set `LACUNA_REQUIRE_OWN_KEY=1` so everyone
+  brings their own, or add accounting before opening the door. One graph is 6 model
+  calls at Detailed (root plus one per branch; leaves come from their parent's
+  response), so this adds up faster than it looks.
 
 ## Scripts
 

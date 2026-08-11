@@ -132,7 +132,13 @@ export function serverCredentials({ evenWithoutKey = false } = {}) {
 }
 
 export async function credentialsForUser(user) {
-  const own = user ? await getUserAiCredentials(user.id) : null;
+  // No account, no credential — not even the server's. The routes require a
+  // session before they get here, so this is the second lock rather than the first:
+  // an anonymous request that reached a model call would be spending the server
+  // owner's key for a stranger.
+  if (!user) return { apiKey: null, source: 'none' };
+
+  const own = await getUserAiCredentials(user.id);
   if (own) {
     return {
       apiKey: own.apiKey,

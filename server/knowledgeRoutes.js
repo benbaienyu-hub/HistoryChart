@@ -433,7 +433,28 @@ function send(res, status, payload) {
 // Exported so the dev-server plugin and the standalone server (server/index.mjs)
 // answer this identically — the client uses it to decide whether the AI features
 // are available at all.
+// Both AI routes need a signed-in account.
+//
+// This used to be open, on the reasoning that being anonymous was survivable here.
+// On a deployment anyone can reach, it is not: an unauthenticated route backed by
+// the server's key is a free model proxy for whoever finds the URL, billed to
+// whoever set the server up. Every other route in the app already requires a
+// session; this brings the expensive one into line.
+//
+// Returns null once it has answered, so callers can `if (!user) return;`.
+async function signedIn(req, res) {
+  const user = await currentUser(req);
+  if (!user) {
+    send(res, 401, { error: 'Sign in to use the AI features.', code: 'SIGN_IN' });
+    return null;
+  }
+  return user;
+}
+
 export async function handleKnowledgeStatus(req, res) {
+  const user = await signedIn(req, res);
+  if (!user) return;
+
   if (mockEnabled()) {
     send(res, 200, {
       configured: true,
@@ -450,7 +471,7 @@ export async function handleKnowledgeStatus(req, res) {
   // whether the server has one: with own-key mode on, a signed-in guest without a
   // key of their own has no AI at all, and the UI needs to say so rather than
   // offering buttons that will fail.
-  const credentials = await credentialsForUser(await currentUser(req));
+  const credentials = await credentialsForUser(user);
   send(res, 200, {
     configured: Boolean(credentials.apiKey),
     model: credentials.model ?? readModel(),
@@ -466,6 +487,11 @@ export async function handleKnowledgeRequest(req, res) {
     send(res, 405, { error: 'Use POST' });
     return;
   }
+
+  // Before reading the body, and before any model call: this is the route that
+  // spends money.
+  const user = await signedIn(req, res);
+  if (!user) return;
 
   let body;
   try {
@@ -489,7 +515,7 @@ export async function handleKnowledgeRequest(req, res) {
   // Resolved once, so the error branches below can report the credential that
   // actually failed rather than re-reading the environment and describing a key
   // the request never used.
-  const credentials = await credentialsForUser(await currentUser(req));
+  const credentials = await credentialsForUser(user);
   const ownKey = credentials.source === 'user';
 
   try {

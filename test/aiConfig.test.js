@@ -118,11 +118,13 @@ describe('whose key pays', () => {
     expect(await credentialsForUser(null)).toMatchObject({ apiKey: null, source: 'none' });
   });
 
-  it('gives a visitor the server key when one is configured', async () => {
-    // Not a security hole: every canvas route requires a session, and the
-    // knowledge route is the one place where being anonymous is survivable.
+  it('gives a visitor nothing, not even the server key', async () => {
+    // This used to hand over the server's key, on the reasoning that being
+    // anonymous was survivable here. On a deployment anyone can reach it is not:
+    // that is a free model proxy billed to whoever set the server up. The routes
+    // require a session now; this is the second lock behind that one.
     vi.stubEnv('OPENAI_API_KEY', OWNER_KEY);
-    expect(await credentialsForUser(null)).toMatchObject({ apiKey: OWNER_KEY, source: 'server' });
+    expect(await credentialsForUser(null)).toEqual({ apiKey: null, source: 'none' });
   });
 });
 
