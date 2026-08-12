@@ -1,14 +1,10 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Handle, Position } from 'reactflow';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CATEGORIES, categoryColor, categoryLabel } from '../lib/categories';
-import {
-  hasImageFiles,
-  imagesFromClipboard,
-  imagesFromDataTransfer,
-  sortImageFiles,
-} from '../lib/imageFiles';
-import { AddImageButton, ImageStrip } from './BlockImages';
+import { categoryColor, categoryLabel } from '../lib/categories';
+import { hasImageFiles, imagesFromClipboard, imagesFromDataTransfer } from '../lib/imageFiles';
+import { ImageStrip } from './BlockImages';
+import BlockMenu from './BlockMenu';
 
 // Top/bottom handles only anchor the parent→child tree edges, so they ignore
 // pointer events (they used to swallow clicks meant for the "+" button).
@@ -62,7 +58,6 @@ function KnowledgeBlock({ data, id }) {
   const [labelDraft, setLabelDraft] = useState(label);
   const labelInputRef = useRef(null);
 
-  const [showPalette, setShowPalette] = useState(false);
   // Highlighted while a file is being dragged over the block, so it is obvious
   // where the picture is about to land.
   const [dropping, setDropping] = useState(false);
@@ -155,18 +150,29 @@ function KnowledgeBlock({ data, id }) {
         title="Drag to connect"
       />
 
+      {/* Two controls, not five. "Open larger" stays its own button because it is
+          what you reach for while reading; everything you do while *editing* is
+          behind the ⋯. */}
       <div className="nodrag absolute right-2 top-2.5 flex items-center gap-0.5">
-        <AddImageButton
-          onFiles={(files) => onAddImages?.(id, sortImageFiles(files))}
-          className="flex h-5 w-5 items-center justify-center rounded-full text-subink/40 hover:bg-hover hover:text-ink"
-        />
+        {unsure && (
+          // A state, not a control — clearing it is a menu item. The block also
+          // carries a warning-coloured ring, but that reads as selection to anyone
+          // who hasn't seen it before, so the flag says what it is.
+          <span
+            title="Flagged as “not sure”"
+            className="mr-0.5 flex h-5 items-center rounded-full bg-warn-bg px-1.5 text-[10.5px] font-bold text-warn"
+          >
+            ?
+          </span>
+        )}
         <button
           type="button"
           onClick={() => onExpand(id)}
           title="Open larger"
-          className="flex h-5 w-5 items-center justify-center rounded-full text-subink/40 hover:bg-hover hover:text-ink"
+          aria-label="Open larger"
+          className="flex h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-hover hover:text-ink"
         >
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path
               d="M6 2.5H2.5V6M10 2.5h3.5V6M6 13.5H2.5V10M10 13.5h3.5V10"
               stroke="currentColor"
@@ -176,42 +182,15 @@ function KnowledgeBlock({ data, id }) {
             />
           </svg>
         </button>
-        <button
-          type="button"
-          onClick={() => onFieldChange(id, { unsure: !unsure })}
-          title={unsure ? 'Clear “not sure” flag' : 'Mark as “not sure”'}
-          className={`h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
-            unsure
-              ? 'flex bg-warn-bg text-warn'
-              : 'hidden text-subink/50 hover:bg-hover hover:text-ink group-hover:flex'
-          }`}
-        >
-          ?
-        </button>
-        <button
-          type="button"
-          onClick={startLabelEdit}
-          title="Rename"
-          className="hidden h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-hover hover:text-ink group-hover:flex"
-        >
-          <svg width="11" height="11" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M11.5 2.5l2 2-7.5 7.5-2.5.5.5-2.5 7.5-7.5z"
-              stroke="currentColor"
-              strokeWidth="1.3"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        </button>
-        <button
-          type="button"
-          onClick={() => onDelete(id)}
-          title="Delete"
-          className="hidden h-5 w-5 items-center justify-center rounded-full text-subink/50 hover:bg-hover hover:text-ink group-hover:flex"
-        >
-          ×
-        </button>
+        <BlockMenu
+          id={id}
+          category={category}
+          unsure={unsure}
+          onFieldChange={onFieldChange}
+          onRename={startLabelEdit}
+          onAddImages={onAddImages}
+          onDelete={onDelete}
+        />
       </div>
 
       {aiSuggested && (
@@ -221,45 +200,13 @@ function KnowledgeBlock({ data, id }) {
       )}
 
       <div className="flex items-start gap-2.5">
-        <div className="relative shrink-0">
-          <button
-            type="button"
-            onClick={() => setShowPalette((v) => !v)}
-            title={`Category: ${categoryLabel(category)}`}
-            className="nodrag mt-1.5 block h-2.5 w-2.5 rounded-full ring-offset-1 transition-transform hover:scale-125"
-            style={{ backgroundColor: categoryColor(category) }}
-          />
-          <AnimatePresence>
-            {showPalette && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.9, y: -4 }}
-                animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.9 }}
-                className="nodrag absolute left-0 top-6 z-50 w-[132px] rounded-xl border border-line2 bg-panel p-1.5 shadow-[0_8px_24px_-6px_rgba(0,0,0,0.25)]"
-              >
-                {CATEGORIES.map((c) => (
-                  <button
-                    key={c.key}
-                    type="button"
-                    onClick={() => {
-                      onFieldChange(id, { category: c.key });
-                      setShowPalette(false);
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2 py-1 text-left text-[12px] hover:bg-hover ${
-                      (category ?? 'none') === c.key ? 'text-ink' : 'text-subink'
-                    }`}
-                  >
-                    <span
-                      className="h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: c.color }}
-                    />
-                    {c.label}
-                  </button>
-                ))}
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
+        {/* An indicator, not a control. Choosing a category is a menu item now: a
+            2.5px dot is a poor click target and gave no hint that it was one. */}
+        <span
+          title={`Category: ${categoryLabel(category)}`}
+          className="mt-1.5 block h-2.5 w-2.5 shrink-0 rounded-full"
+          style={{ backgroundColor: categoryColor(category) }}
+        />
 
         <div className="min-w-0 flex-1">
           {editingLabel ? (
@@ -281,7 +228,7 @@ function KnowledgeBlock({ data, id }) {
             <p
               onDoubleClick={startLabelEdit}
               title="Double-click to rename"
-              className="truncate pr-20 text-[15.5px] font-semibold leading-tight text-ink"
+              className="truncate pr-12 text-[15.5px] font-semibold leading-tight text-ink"
             >
               {label}
             </p>

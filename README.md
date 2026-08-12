@@ -49,6 +49,31 @@ to `.data/uploads/` and the canvas keeps only `{ id, url, name, caption }`.
 - Adding one requires edit access; viewers can look but not attach.
 - Deleting a canvas deletes its images, so nothing is left on disk that nobody will ever ask for.
 
+## What is on a block
+
+A block carries two controls in its top-right corner, and everything else is behind
+one of them:
+
+- **⛶ Open larger** stays its own button. It is what you reach for while *reading*,
+  and burying a frequent action to tidy away the rare ones is the wrong trade.
+- **⋯ Block options** holds rename, add image, mark "not sure", category, and delete.
+
+It used to be five icons in that corner — three of them appearing only on hover —
+plus a 2.5px colour dot at the top-left that opened a category palette. Six
+affordances on a 320px card, most invisible until you hovered the right pixel. The
+dot is still there as an *indicator* of category; it is no longer a control, because
+a dot that size is a poor click target and gave no hint it was one.
+
+The menu closes on Escape or a click anywhere else — the old palette did neither, and
+sat open until you clicked the dot a second time. Escape is stopped from
+propagating, or the canvas takes it as "deselect" as well. A flagged block keeps a
+small "?" badge, since the warning-coloured ring around it otherwise reads as
+selection.
+
+Two things stay where they are, at the bottom edge: **+ Add subtopic** and the
+**collapse** control, which doubles as the count of hidden blocks. Both are about the
+shape of the tree rather than the contents of one block.
+
 ## Accounts and sharing
 
 Sign-in is real: an account with a password, a session in an httpOnly cookie, and
@@ -677,6 +702,7 @@ hardcode white or black and both themes stay in sync.
 | --- | --- |
 | `src/components/Canvas.jsx` | The canvas: blocks, edges, undo/redo, AI calls |
 | `src/components/KnowledgeBlock.jsx` | A single block — title, notes, date, category, flag |
+| `src/components/BlockMenu.jsx` | The ⋯ menu: every per-block action except "open larger" |
 | `src/components/StudyMode.jsx` | Flashcards from your notes, graded per point |
 | `src/components/Home.jsx` | Canvas library sidebar (Your canvases / Shared with me / Examples) |
 | `src/lib/graph.js` | Pure tree helpers — descendants, collapse visibility |
