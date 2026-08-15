@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import ReactFlow, { Background, BackgroundVariant, Controls, MiniMap } from 'reactflow';
 import { useNodesState, useEdgesState } from 'reactflow';
 import KnowledgeBlock from './KnowledgeBlock';
+import SuggestedBlock from './SuggestedBlock';
 import ShareDialog from './ShareDialog';
 import GapPanel from './GapPanel';
 import RelationDialog from './RelationDialog';
@@ -31,6 +32,7 @@ import {
 } from '../lib/mastery';
 import { categoryColor } from '../lib/categories';
 import { appendPoints } from '../lib/gaps';
+import { isSuggestionId, planInsertion, suggestionGraph, suggestionId } from '../lib/suggestions';
 import { autoLayout } from '../lib/layout';
 import { descendantIds, withVisibility } from '../lib/graph';
 import { graphPlan } from '../lib/graphLevels';
@@ -38,7 +40,7 @@ import { STARTER_TOPICS } from '../lib/templates';
 import { useTheme } from '../lib/theme';
 import ThemeToggle from './ThemeToggle';
 
-const nodeTypes = { knowledge: KnowledgeBlock };
+const nodeTypes = { knowledge: KnowledgeBlock, suggestion: SuggestedBlock };
 
 const ROOT_SPACING = 400;
 const CHILD_SPACING = 364;
@@ -123,6 +125,15 @@ function CanvasEditor({ user, record, onExit }) {
     onDelete: (id) => handlersRef.current.onDelete(id),
   }).current;
 
+  // Same trick for the suggestion nodes: their data is built in a memo, so the
+  // callbacks in it have to be stable or every ghost re-renders whenever
+  // anything on the canvas moves.
+  const suggestionActions = useRef({
+    onOpen: (id) => handlersRef.current.onOpenSuggestion(id),
+    onAccept: (gap) => handlersRef.current.onAcceptSuggestion(gap),
+    onDismiss: (id) => handlersRef.current.onDismissSuggestion(id),
+  }).current;
+
   const hydrate = useCallback(
     (list) => list.map((n) => ({ ...n, data: { ...n.data, isAddingChild: false, ...stable } })),
     [stable]
@@ -141,6 +152,17 @@ function CanvasEditor({ user, record, onExit }) {
   // Which gaps have been applied in this scan, so the button can say "Added ✓"
   // rather than silently doing it twice.
   const [filledGapIds, setFilledGapIds] = useState(() => new Set());
+  // Suggestions turned down. Per scan, not stored: a scan is one opinion about
+  // the canvas as it stands, and a later one looking at different notes has
+  // every right to raise the same idea again.
+  const [dismissedGapIds, setDismissedGapIds] = useState(() => new Set());
+  const [openSuggestionId, setOpenSuggestionId] = useState(null);
+  // React Flow is controlled here, and it keeps a node's measured size only by
+  // sending a "dimensions" change back through onNodesChange for the app to
+  // store. Ghosts are not in node state, so nothing caught those and they stayed
+  // unmeasured — which React Flow renders as `visibility: hidden`, and which
+  // makes it skip the edges attached to them. So they are measured here instead.
+  const [ghostSizes, setGhostSizes] = useState({});
   const [showShare, setShowShare] = useState(false);
   // The dialog edits the grant list, and hands back the canvas the server
   // returned, so the list on screen is always what the server actually stored.
@@ -201,6 +223,62 @@ function CanvasEditor({ user, record, onExit }) {
   const dueNow = useMemo(
     () => countDue(nodes.filter((n) => n.data.notes?.trim()), reviews),
     [nodes, reviews]
+  );
+
+  // Missing gaps, drawn on the canvas between the blocks they belong between.
+  // Ghosts are derived from the scan and never enter node state, so they cannot
+  // be saved, laid out by Tidy, or caught up in undo — none of which should
+  // apply to something you have not accepted yet.
+  const suggestions = useMemo(
+    () => suggestionGraph(gaps, nodes, { dismissed: dismissedGapIds, accepted: filledGapIds }),
+    [gaps, nodes, dismissedGapIds, filledGapIds]
+  );
+
+  const suggestionNodes = useMemo(
+    () =>
+      suggestions.nodes.map((node) => ({
+        ...node,
+        ...ghostSizes[node.id],
+        // Keyed by gap id, not node id: everything the ghost hands back — open,
+        // dismiss, accept — is about the gap, and `suggestion:` prefixed ids
+        // only exist so a ghost cannot collide with a real block.
+        data: { ...node.data, ...suggestionActions, open: node.data.gap.id === openSuggestionId },
+      })),
+    [suggestions.nodes, suggestionActions, openSuggestionId, ghostSizes]
+  );
+
+  // Dimension changes for ghosts are kept here; everything else goes to node
+  // state as before. Splitting them keeps a measurement of something that is not
+  // on the canvas from ever reaching the canvas.
+  const handleNodesChange = useCallback(
+    (changes) => {
+      const measured = changes.filter((c) => c.type === 'dimensions' && isSuggestionId(c.id));
+      if (measured.length > 0) {
+        setGhostSizes((prev) => {
+          let next = prev;
+          for (const change of measured) {
+            const { width, height } = change.dimensions ?? {};
+            if (!width || !height) continue;
+            if (prev[change.id]?.width === width && prev[change.id]?.height === height) continue;
+            if (next === prev) next = { ...prev };
+            next[change.id] = { width, height };
+          }
+          return next;
+        });
+      }
+      const rest = changes.filter((c) => !isSuggestionId(c.id));
+      if (rest.length > 0) onNodesChange(rest);
+    },
+    [onNodesChange]
+  );
+
+  const flowNodes = useMemo(
+    () => (suggestionNodes.length ? [...rendered, ...suggestionNodes] : rendered),
+    [rendered, suggestionNodes]
+  );
+  const flowEdges = useMemo(
+    () => (suggestions.edges.length ? [...visible.edges, ...suggestions.edges] : visible.edges),
+    [visible.edges, suggestions.edges]
   );
 
   // From the rendered list rather than the raw one, so the expanded view carries
@@ -447,6 +525,17 @@ function CanvasEditor({ user, record, onExit }) {
           n.id === id ? { ...n, data: { ...n.data, collapsed: !n.data.collapsed } } : n
         )
       );
+    },
+    onOpenSuggestion(id) {
+      // One open at a time: two expanded ghosts on one canvas is two arguments
+      // being made at once.
+      setOpenSuggestionId((current) => (current === id ? null : id));
+    },
+    onAcceptSuggestion(gap) {
+      handleAcceptSuggestion(gap);
+    },
+    onDismissSuggestion(id) {
+      handleDismissSuggestion(id);
     },
     onDelete(id) {
       pushHistory();
@@ -806,6 +895,8 @@ function CanvasEditor({ user, record, onExit }) {
       // per-scan, and a gap you filled may legitimately come back if it is still
       // thin.
       setFilledGapIds(new Set());
+      setDismissedGapIds(new Set());
+      setOpenSuggestionId(null);
     } catch (error) {
       setGapError(error.message);
       if (error.code === 'NO_API_KEY') fetchAiStatus({ force: true }).then(setAiStatus);
@@ -819,9 +910,9 @@ function CanvasEditor({ user, record, onExit }) {
   // right, and deleting somebody's sentence on that basis is not this app's call.
   function handleFillGap(gap) {
     if (gap.fill.length === 0) return;
-    pushHistory();
 
     if (gap.blockId) {
+      pushHistory();
       setNodes((prev) =>
         prev.map((n) =>
           n.id === gap.blockId
@@ -836,38 +927,101 @@ function CanvasEditor({ user, record, onExit }) {
             : n
         )
       );
-    } else {
-      // A gap belonging to no block is a subject the canvas never covers, so it
-      // becomes a block of its own rather than being wedged into an unrelated one.
-      const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
-      const x = roots.length
-        ? Math.max(...roots.map((n) => n.position.x)) + CHILD_SPACING
-        : 0;
-      setNodes((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          type: 'knowledge',
-          position: { x, y: roots.length ? roots[0].position.y : 0 },
-          data: {
-            ...NEW_BLOCK_FIELDS,
-            label: gap.title,
-            notes: appendPoints('', gap.fill),
-            aiFilled: true,
-            parentId: null,
-            isRoot: true,
-          },
-        },
-      ]);
+      setFilledGapIds((prev) => new Set(prev).add(gap.id));
+      return;
     }
 
+    // A gap belonging to no block is a subject the canvas never covers, so it
+    // becomes a block of its own. Same code path as accepting its ghost — one
+    // undo step, and filling from the panel cannot disagree with accepting on
+    // the canvas about where the block lands or what it is wired to.
+    handleAcceptSuggestion(gap);
+  }
+
+  // Accepting a suggestion: the ghost becomes a real block, at the place it was
+  // already drawn, threaded into the chain it was drawn across.
+  //
+  // The re-parenting is the part worth being careful about. It only happens when
+  // the two blocks the model named really are parent and child — then the new
+  // block goes between them and the chain reads through it, which is the whole
+  // promise of drawing it there. Any other pairing and it is added beside the
+  // structure rather than rearranging one the user built.
+  function handleAcceptSuggestion(gap) {
+    const plan = planInsertion(gap, liveRef.current.nodes);
+    const id = crypto.randomUUID();
+    // Where the ghost is standing, so the block appears exactly where the
+    // suggestion was. A gap with no ghost — dismissed, or one of the kinds that
+    // never gets drawn — falls back to a column of its own on the right.
+    const ghost = suggestions.nodes.find((n) => n.id === suggestionId(gap.id));
+    const position = ghost?.position ?? besideTheRoots();
+    pushHistory();
+
+    setNodes((prev) => [
+      ...prev.map((n) =>
+        n.id === plan.reparent ? { ...n, data: { ...n.data, parentId: id, isRoot: false } } : n
+      ),
+      {
+        id,
+        type: 'knowledge',
+        position,
+        data: {
+          ...NEW_BLOCK_FIELDS,
+          label: gap.title,
+          notes: appendPoints('', gap.fill),
+          aiFilled: true,
+          parentId: plan.parentId,
+          isRoot: plan.isRoot,
+        },
+      },
+    ]);
+
+    setEdges((prev) => {
+      const kept = plan.unlink
+        ? prev.filter(
+            (e) => !(e.source === plan.unlink.source && e.target === plan.unlink.target)
+          )
+        : prev;
+      const added = [];
+      if (plan.parentId) added.push(makeEdge(plan.parentId, id));
+      if (plan.reparent) added.push(makeEdge(id, plan.reparent));
+      if (plan.relateTo) {
+        added.push(
+          styleEdge({
+            id: `r-${id}-${plan.relateTo}`,
+            source: id,
+            target: plan.relateTo,
+            label: 'leads to',
+            data: { manual: true },
+          })
+        );
+      }
+      return [...kept, ...added];
+    });
+
+    setOpenSuggestionId(null);
+    // Marked filled rather than dismissed: the panel should say "Added ✓" for
+    // this gap, not quietly forget it existed.
     setFilledGapIds((prev) => new Set(prev).add(gap.id));
   }
 
+  function besideTheRoots() {
+    const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
+    if (roots.length === 0) return { x: 0, y: 0 };
+    return { x: Math.max(...roots.map((n) => n.position.x)) + CHILD_SPACING, y: roots[0].position.y };
+  }
+
+  function handleDismissSuggestion(gapId) {
+    setOpenSuggestionId((current) => (current === gapId ? null : current));
+    setDismissedGapIds((prev) => new Set(prev).add(gapId));
+  }
+
   // Clicking the block name on a gap card brings it into view, which matters once
-  // the canvas is bigger than the screen.
+  // the canvas is bigger than the screen. Suggestions count: a missing gap's card
+  // points at its ghost, which is somewhere out on the canvas by definition.
   function handleJumpToBlock(blockId) {
-    const node = liveRef.current.nodes.find((n) => n.id === blockId);
+    const node =
+      liveRef.current.nodes.find((n) => n.id === blockId) ??
+      suggestions.nodes.find((n) => n.id === blockId);
     if (!node || !flowRef.current) return;
     flowRef.current.setCenter(node.position.x + 160, node.position.y + 120, {
       zoom: 1,
@@ -1231,9 +1385,9 @@ function CanvasEditor({ user, record, onExit }) {
       )}
 
       <ReactFlow
-        nodes={rendered}
-        edges={visible.edges}
-        onNodesChange={onNodesChange}
+        nodes={flowNodes}
+        edges={flowEdges}
+        onNodesChange={handleNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={handleConnect}
         onEdgeClick={(_, edge) => {
@@ -1275,6 +1429,7 @@ function CanvasEditor({ user, record, onExit }) {
             busy={gapsBusy}
             error={gapError}
             filledIds={filledGapIds}
+            dismissedIds={dismissedGapIds}
             onFill={handleFillGap}
             onJump={handleJumpToBlock}
             onRescan={handleFindGaps}

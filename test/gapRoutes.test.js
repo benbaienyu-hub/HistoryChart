@@ -103,6 +103,17 @@ describe('the instructions', () => {
   it('asks for dot points, because they become study cards', () => {
     expect(GAP_SYSTEM).toMatch(/dot points/);
   });
+
+  it('tells it to place a missing idea only where it would defend the position', () => {
+    // A suggestion drawn between the wrong two blocks is worse than one parked
+    // off to the side: it makes a claim about the argument that is not true.
+    expect(GAP_SYSTEM).toMatch(/only guess a position you would defend/i);
+    expect(GAP_SYSTEM).toMatch(/a step it jumps over/i);
+  });
+
+  it('keeps the other two kinds off the canvas', () => {
+    expect(GAP_SYSTEM).toMatch(/for "incorrect" and "incomplete", always use 0 for both/i);
+  });
 });
 
 describe('the schema', () => {
@@ -111,6 +122,8 @@ describe('the schema', () => {
     expect(props.required).toEqual([
       'kind',
       'blockRef',
+      'afterRef',
+      'beforeRef',
       'title',
       'detail',
       'hint',
@@ -118,6 +131,15 @@ describe('the schema', () => {
       'answer',
       'fill',
     ]);
+  });
+
+  it('asks a missing gap where it belongs, so it can be drawn there', () => {
+    // The two fields that turn a list entry into a block on the canvas between
+    // the two it belongs between.
+    const props = GAP_SCHEMA.properties.gaps.items.properties;
+    expect(props.afterRef.type).toBe('integer');
+    expect(props.beforeRef.type).toBe('integer');
+    expect(props.beforeRef.description).toMatch(/missing/i);
   });
 
   it('constrains the kinds to the three the app knows', () => {
@@ -158,6 +180,42 @@ describe('generateGaps', () => {
     expect(gaps).toHaveLength(1);
     expect(gaps[0]).toMatchObject({ kind: 'incorrect', blockId: 'a', blockLabel: 'Nationalisation' });
     expect(gaps[0].fill).toEqual(['Nasser nationalised the canal in July 1956.']);
+  });
+
+  it('resolves the placement refs back to real blocks', async () => {
+    reply = {
+      gaps: [
+        {
+          kind: 'missing',
+          blockRef: 0,
+          afterRef: 1,
+          beforeRef: 2,
+          title: 'What actually connected them',
+          detail: 'The canvas jumps straight from one to the other.',
+          hint: 'Think about what happened in between.',
+          question: 'What linked them?',
+          answer: 'A thing.',
+          fill: '- A thing happened in between.',
+        },
+      ],
+    };
+
+    const { gaps } = await generateGaps({ title: 'Suez', nodes: CANVAS }, credentials());
+    expect(gaps[0]).toMatchObject({
+      afterId: 'a',
+      afterLabel: 'Nationalisation',
+      beforeId: 'b',
+      beforeLabel: 'Reaction',
+    });
+  });
+
+  it('offers an offline sample that sits between two blocks', async () => {
+    // So the drawn-on-canvas case can be seen with no key and no bill.
+    vi.stubEnv('OPENAI_MOCK', '1');
+    const { gaps } = await generateGaps({ title: 'Suez', nodes: CANVAS }, credentials());
+    const missing = gaps.find((g) => g.kind === 'missing');
+    expect(missing.afterId).toBe('a');
+    expect(missing.beforeId).toBe('b');
   });
 
   it('spends nothing on an empty canvas', async () => {

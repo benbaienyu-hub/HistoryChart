@@ -94,12 +94,26 @@ export function normalizeGaps(raw, digest = []) {
       if (!title) return null;
 
       const block = byRef.get(Number(gap?.blockRef)) ?? null;
+      // Where a missing idea belongs in the chain, so it can be drawn there
+      // rather than listed in a panel. Only "missing" gets a place: a wrong or
+      // thin claim is about a block that already exists, and there is nothing to
+      // put on the canvas between anything.
+      const after = kind === 'missing' ? (byRef.get(Number(gap?.afterRef)) ?? null) : null;
+      const rawBefore = kind === 'missing' ? (byRef.get(Number(gap?.beforeRef)) ?? null) : null;
+      // A gap "between X and X" is a model slip, and drawing an arrow from a
+      // block back to itself would be nonsense.
+      const before = rawBefore && rawBefore.id !== after?.id ? rawBefore : null;
+
       return {
         // Stable within a scan, which is all the UI needs to key and dismiss by.
         id: `${kind}-${index}-${title.slice(0, 40)}`,
         kind,
         blockId: block?.id ?? null,
         blockLabel: block?.label ?? null,
+        afterId: after?.id ?? null,
+        afterLabel: after?.label ?? null,
+        beforeId: before?.id ?? null,
+        beforeLabel: before?.label ?? null,
         title,
         detail: String(gap?.detail ?? '').trim(),
         hint: String(gap?.hint ?? '').trim(),

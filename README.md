@@ -415,7 +415,51 @@ told to flag only a claim it is confident is wrong. Being wrongly told you are
 wrong is the worst outcome available here, because you go and "correct"
 something that was already right.
 
-**Three things you can do with each gap**, in this order on the card:
+#### Missing ideas are drawn where they belong
+
+A canvas is a chain of thought, and the most useful thing a review can find is a
+step the chain jumps over:
+
+```
+WWI → Treaty of Versailles → Hitler
+```
+
+Reported in a list, "you've skipped the Weimar Republic" is a sentence you have
+to hold in your head while you look at the canvas and work out where it goes.
+So instead it is **drawn there** — a dashed, translucent block between the two
+real ones, with the arrows routed through it:
+
+```
+WWI → Treaty of Versailles → [Weimar Republic?] → Hitler
+```
+
+Click one and it opens in place — not into a dialog, because the whole argument
+for drawing it on the canvas is that its position carries meaning, and a modal
+over the top hides exactly the thing you are being asked to judge. It says why
+Lacuna thinks it is missing, and offers **Add to canvas**, **Test me**, and
+**Dismiss**.
+
+**Only *missing* gaps become blocks.** A wrong or thin claim is about a block
+that already exists — there is nothing to put on the canvas between anything,
+and a ghost block saying "this claim is wrong" would misrepresent what it is.
+Those two kinds stay in the panel, on the block they concern, and the panel says
+where the missing ones went.
+
+**Accepting one threads it into the chain** when the two blocks named really are
+parent and child: the new block goes between them, the old edge is replaced, and
+the child re-parents onto it. Any other pairing and it is added *beside* the
+structure with a "leads to" relation instead — rearranging a graph the user built
+on a guess about what they meant is not something to do quietly. It is one undo
+step either way.
+
+Nothing about a ghost is real until you accept it. They cannot be dragged,
+selected, connected or saved, they never reach node state, and Tidy ignores
+them. **Dismissing lasts for the scan, not forever**: a later scan is looking at
+different notes and has every right to raise the same idea again. At most six are
+drawn at once — a canvas buried in dashed boxes is the opposite of seeing the
+hole — and the panel says so when there are more.
+
+**Three things you can do with each gap** in the panel, in this order on the card:
 
 1. **Test me** — asks you the question, and keeps the answer behind a second
    click. You find out whether you actually knew it.
@@ -825,6 +869,8 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/gaps.js` | Gap logic — the canvas digest, the three kinds, appending a fill |
 | `server/gapRoutes.js` | The gap prompt and schema — what "find my gaps" asks for |
 | `src/components/GapPanel.jsx` | The gaps drawer: Test me / Hint / Fill gap per gap |
+| `src/lib/suggestions.js` | Where a missing idea gets drawn, and what accepting it does to the graph |
+| `src/components/SuggestedBlock.jsx` | The dashed ghost block, and its three answers |
 | `src/lib/api.js` | Client side of the account API, including uploads |
 | `src/lib/imageFiles.js` | Getting images out of a picker, a drag, or a paste |
 | `src/lib/canvasShape.js` | What a canvas looks like when stored — the persistence allowlist |

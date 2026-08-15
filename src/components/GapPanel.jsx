@@ -1,6 +1,12 @@
 import { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { GAP_KINDS, describeGaps } from '../lib/gaps';
+import {
+  MAX_SUGGESTIONS,
+  describePlacement,
+  suggestibleGaps,
+  suggestionId,
+} from '../lib/suggestions';
 
 // The result of "Find my gaps": a list of holes, each with three ways to respond.
 //
@@ -23,7 +29,7 @@ function KindBadge({ kind }) {
   );
 }
 
-function Gap({ gap, onFill, onJump, filled }) {
+function Gap({ gap, onFill, onJump, filled, drawn }) {
   // One open action at a time per gap: showing a hint and a question and an answer
   // all at once is just the answer with extra steps.
   const [showing, setShowing] = useState(null);
@@ -47,6 +53,19 @@ function Gap({ gap, onFill, onJump, filled }) {
             className="max-w-[45%] truncate text-[11px] text-subink hover:text-accent hover:underline"
           >
             {gap.blockLabel}
+          </button>
+        ) : drawn ? (
+          // A missing gap is drawn on the canvas, so its card points at the
+          // ghost rather than describing a location you then have to find. Only
+          // while the ghost is actually there — a link to something dismissed or
+          // already added would be a button that does nothing.
+          <button
+            type="button"
+            onClick={() => onJump?.(suggestionId(gap.id))}
+            title="Show this suggestion on the canvas"
+            className="max-w-[55%] truncate text-[11px] text-accent hover:underline"
+          >
+            {describePlacement(gap)}
           </button>
         ) : (
           <span className="text-[11px] text-subink/70">whole canvas</span>
@@ -143,7 +162,33 @@ function Gap({ gap, onFill, onJump, filled }) {
   );
 }
 
-export default function GapPanel({ gaps, busy, error, filledIds, onFill, onJump, onRescan, onClose }) {
+export default function GapPanel({
+  gaps,
+  busy,
+  error,
+  filledIds,
+  dismissedIds,
+  onFill,
+  onJump,
+  onRescan,
+  onClose,
+}) {
+  const missing = suggestibleGaps(gaps);
+  // The ones actually on the canvas right now, in the same order and under the
+  // same cap the canvas uses, so the panel and the canvas agree about what is
+  // out there.
+  const onCanvas = new Set(
+    missing
+      .filter((gap) => !filledIds.has(gap.id) && !dismissedIds?.has(gap.id))
+      .slice(0, MAX_SUGGESTIONS)
+      .map((gap) => gap.id)
+  );
+  const drawn = onCanvas.size;
+  // Said out loud rather than silently truncated: a canvas covered in dashed
+  // boxes is the opposite of seeing the hole, but a cap nobody mentions reads as
+  // "that was all of them".
+  const overflow = Math.max(0, missing.length - MAX_SUGGESTIONS);
+
   return (
     <motion.aside
       initial={{ x: 40, opacity: 0 }}
@@ -199,6 +244,24 @@ export default function GapPanel({ gaps, busy, error, filledIds, onFill, onJump,
           </div>
         )}
 
+        {/* Where the missing ones went. Without this the panel looks like it has
+            lost some of what the scan found. */}
+        {!busy && !error && drawn > 0 && (
+          <p className="mb-2 rounded-xl border border-accent/25 bg-accent-soft/60 px-3 py-2 text-[12px] leading-snug text-ink/90">
+            {drawn === 1 ? 'One missing idea is' : `${drawn} missing ideas are`} drawn on the canvas
+            as dashed blocks, where {drawn === 1 ? 'it belongs' : 'they belong'}. Click{' '}
+            {drawn === 1 ? 'it' : 'one'} to add, test yourself, or dismiss.
+            {overflow > 0 && (
+              <>
+                {' '}
+                <span className="text-subink">
+                  {overflow} more {overflow === 1 ? 'is' : 'are'} listed below but not drawn.
+                </span>
+              </>
+            )}
+          </p>
+        )}
+
         {!busy && gaps.length > 0 && (
           <ul className="space-y-2">
             {gaps.map((gap) => (
@@ -206,6 +269,7 @@ export default function GapPanel({ gaps, busy, error, filledIds, onFill, onJump,
                 key={gap.id}
                 gap={gap}
                 filled={filledIds.has(gap.id)}
+                drawn={onCanvas.has(gap.id)}
                 onFill={onFill}
                 onJump={onJump}
               />

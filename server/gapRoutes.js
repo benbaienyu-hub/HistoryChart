@@ -36,6 +36,16 @@ const GAP_SCHEMA = {
             description:
               'The number of the block this concerns, from the list given. Use 0 when it belongs to the canvas as a whole rather than to one block.',
           },
+          afterRef: {
+            type: 'integer',
+            description:
+              'For "missing" only: the number of the block this idea should come AFTER, if it belongs at a particular point in their chain of thought. 0 if it does not.',
+          },
+          beforeRef: {
+            type: 'integer',
+            description:
+              'For "missing" only: the number of the block this idea should come BEFORE. Give both this and afterRef when the idea is a step their canvas jumps over. 0 if it does not.',
+          },
           title: {
             type: 'string',
             description: 'A few words naming the gap. Not a sentence.',
@@ -64,7 +74,18 @@ const GAP_SCHEMA = {
               'The notes to add if the user asks for it: dot points, one per line, each beginning "- ", each a complete sentence carrying specifics. For "incorrect", this is the corrected statement.',
           },
         },
-        required: ['kind', 'blockRef', 'title', 'detail', 'hint', 'question', 'answer', 'fill'],
+        required: [
+          'kind',
+          'blockRef',
+          'afterRef',
+          'beforeRef',
+          'title',
+          'detail',
+          'hint',
+          'question',
+          'answer',
+          'fill',
+        ],
         additionalProperties: false,
       },
     },
@@ -91,6 +112,8 @@ Be careful with "incorrect". Only flag a claim you are confident is wrong — no
 
 The hint must not contain the answer. It points; the answer answers. If your hint would let someone write the answer without knowing it, rewrite it.
 
+Place the missing ones. A canvas is a chain of thought, and the most useful missing idea is usually a step it jumps over: A leads to C, and B — the thing that actually connects them — is not there. When that is what you have found, give "afterRef" and "beforeRef" as the two blocks it belongs between. Give "afterRef" alone when the idea follows from one block but leads nowhere in particular on this canvas. Leave both 0 when it does not attach to their existing structure at all. Only guess a position you would defend: a suggestion drawn in the wrong place is worse than one drawn off to the side. For "incorrect" and "incomplete", always use 0 for both — those concern a block that already exists.
+
 Write "fill" as dot points, one per line, each starting "- ", each a complete sentence that carries names, dates or numbers. These become the user's notes and, later, the cards they are tested on — so a point that says nothing is a mark they lose for remembering nothing.`;
 
 // Offline sample gaps, one of each kind, so the whole flow can be exercised with no
@@ -104,6 +127,8 @@ function mockGaps(digest) {
       {
         kind: 'incorrect',
         blockRef: first?.ref ?? 0,
+        afterRef: 0,
+        beforeRef: 0,
         title: '[offline sample] A date that looks wrong',
         detail:
           'This is sample output, not a real review — set OPENAI_MOCK=0 and add a key for the real thing.',
@@ -115,8 +140,13 @@ function mockGaps(digest) {
       {
         kind: 'missing',
         blockRef: 0,
-        title: '[offline sample] An idea the canvas never mentions',
-        detail: 'Sample output. Canvas-level gaps have no block, and can be added as a new one.',
+        // Positioned between the first two blocks, so the offline demo shows the
+        // case the feature exists for: a step the canvas jumps over.
+        afterRef: first?.ref ?? 0,
+        beforeRef: second?.ref ?? 0,
+        title: '[offline sample] A step this canvas jumps over',
+        detail:
+          'Sample output. A missing idea with a place in the chain is drawn on the canvas between the two blocks it belongs between.',
         hint: 'Think about what connects the blocks you already have.',
         question: 'A real question would go here.',
         answer: 'And its answer here.',
@@ -125,6 +155,8 @@ function mockGaps(digest) {
       {
         kind: 'incomplete',
         blockRef: second?.ref ?? first?.ref ?? 0,
+        afterRef: 0,
+        beforeRef: 0,
         title: '[offline sample] Something named but not explained',
         detail: 'Sample output — this is what a thin note looks like when flagged.',
         hint: 'Ask yourself why it mattered, not just when it happened.',
@@ -152,6 +184,7 @@ export function buildGapPrompt({ title, digest }) {
     blocks,
     '',
     'Report the gaps. Use the block numbers above for "blockRef", or 0 for something that belongs to the canvas as a whole rather than to any one block.',
+    'For each "missing" gap, also say where it belongs: "afterRef" and "beforeRef" are block numbers from the same list, and 0 means "nowhere in particular".',
   ].join('\n');
 }
 
@@ -167,7 +200,8 @@ export async function generateGaps({ title, nodes }, credentials) {
     prompt: buildGapPrompt({ title, digest }),
     schemaName: 'gaps',
     schema: GAP_SCHEMA,
-    shape: '{"gaps": [{"kind": "missing|incorrect|incomplete", "blockRef": 0, "title": "…", "detail": "…", "hint": "…", "question": "…", "answer": "…", "fill": "- …"}]}',
+    shape:
+      '{"gaps": [{"kind": "missing|incorrect|incomplete", "blockRef": 0, "afterRef": 0, "beforeRef": 0, "title": "…", "detail": "…", "hint": "…", "question": "…", "answer": "…", "fill": "- …"}]}',
   });
 
   return { gaps: normalizeGaps(parsed?.gaps, digest), digest };

@@ -36,7 +36,7 @@ the editorial notation for one. The product is about the gap, not the notes.
 ### What is genuinely different
 
 - **The map and the deck are the same object.** No re-typing. Building the map *is* making the flashcards — and the map is where the results come back, coloured per block.
-- **The AI's job is to find what's missing from your writing** — not to write it for you. A tool that writes your notes leaves you with nothing learned.
+- **The AI's job is to find what's missing from your writing** — not to write it for you. A tool that writes your notes leaves you with nothing learned. And a missing idea is *drawn on the canvas* as a dashed block between the two it belongs between, so you see the hole in the argument rather than reading about it in a list.
 - **Grading is per point**, which produces the data nobody else has: not "you scored 6/10" but "you don't know these four facts."
 - **Bring your own AI.** The app talks to any OpenAI-compatible endpoint, including a model running locally on your own laptop for free. Already built and working.
 
