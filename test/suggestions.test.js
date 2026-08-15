@@ -114,6 +114,20 @@ describe('suggestionGraph', () => {
     expect(nodes[0].position).not.toEqual(nodes[1].position);
   });
 
+  it('moves a crowded suggestion aside rather than below', () => {
+    // A tight chain leaves no room at the midpoint, and the height is what
+    // carries the meaning: level with the space between two blocks still reads
+    // as "between them", however far out to the side. Below both of them reads
+    // as "after", which is a different claim.
+    const tight = [
+      { id: 'a', position: { x: 0, y: 0 }, data: { label: 'A', parentId: null } },
+      { id: 'b', position: { x: 0, y: 240 }, data: { label: 'B', parentId: 'a' } },
+    ];
+    const [ghost] = suggestionGraph([gap({ afterId: 'a', beforeId: 'b' })], tight).nodes;
+    expect(ghost.position.y).toBe(120);
+    expect(ghost.position.x).toBeGreaterThan(0);
+  });
+
   it('does not drop a suggestion on top of a real block either', () => {
     const nodes = [
       { id: 'a', position: { x: 0, y: 0 }, data: { label: 'A', parentId: null } },

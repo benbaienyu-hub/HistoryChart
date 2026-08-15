@@ -1,6 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import ReactFlow, { Background, BackgroundVariant, Controls, MiniMap } from 'reactflow';
+import ReactFlow, {
+  Background,
+  BackgroundVariant,
+  Controls,
+  MiniMap,
+  getRectOfNodes,
+  getViewportForBounds,
+} from 'reactflow';
 import { useNodesState, useEdgesState } from 'reactflow';
 import KnowledgeBlock from './KnowledgeBlock';
 import SuggestedBlock from './SuggestedBlock';
@@ -53,6 +60,11 @@ const RELATION_EDGE_STYLE = {
 };
 const HISTORY_LIMIT = 50;
 const SAVE_DEBOUNCE_MS = 400;
+// The gaps drawer and the toolbar both sit over the canvas, so the part of it you
+// can actually see is smaller than the pane. Framing a suggestion has to aim at
+// that, or it lands underneath one of them.
+const GAP_PANEL_WIDTH = 340;
+const TOOLBAR_HEIGHT = 57;
 
 const NEW_BLOCK_FIELDS = {
   notes: '',
@@ -246,6 +258,52 @@ function CanvasEditor({ user, record, onExit }) {
       })),
     [suggestions.nodes, suggestionActions, openSuggestionId, ghostSizes]
   );
+
+  // A suggestion is drawn the instant the scan answers — but "drawn" is no use if
+  // it is off the side of the canvas or behind the gaps drawer, which is where a
+  // new one usually lands on anything bigger than a screenful. So the first time
+  // a scan's ghosts exist, the viewport moves to them.
+  //
+  // Framed with the blocks they sit between rather than on their own: the claim a
+  // suggestion makes is about the two things it interrupts, and a close-up of the
+  // dashed box alone shows none of that.
+  const framedGhostIds = useRef(new Set());
+  useEffect(() => {
+    const fresh = suggestions.nodes.filter((n) => !framedGhostIds.current.has(n.id));
+    if (fresh.length === 0 || !flowRef.current || !wrapperRef.current) return;
+    // Wait for React Flow to measure them. Until it has, they have no size, and
+    // the bounds would be computed from a point rather than a box.
+    if (!fresh.every((n) => ghostSizes[n.id])) return;
+
+    for (const node of suggestions.nodes) framedGhostIds.current.add(node.id);
+
+    const wanted = new Set();
+    for (const node of fresh) {
+      wanted.add(node.id);
+      if (node.data.gap.afterId) wanted.add(node.data.gap.afterId);
+      if (node.data.gap.beforeId) wanted.add(node.data.gap.beforeId);
+    }
+    const shown = flowRef.current.getNodes().filter((n) => wanted.has(n.id));
+    if (shown.length === 0) return;
+
+    const pane = wrapperRef.current.getBoundingClientRect();
+    const visibleWidth = Math.max(320, pane.width - (gapsOpen ? GAP_PANEL_WIDTH : 0));
+    const visibleHeight = Math.max(240, pane.height - TOOLBAR_HEIGHT);
+    const viewport = getViewportForBounds(
+      getRectOfNodes(shown),
+      visibleWidth,
+      visibleHeight,
+      0.2,
+      1,
+      0.22
+    );
+    // getViewportForBounds measures from the top-left of the area it was given,
+    // which here starts below the toolbar.
+    flowRef.current.setViewport(
+      { x: viewport.x, y: viewport.y + TOOLBAR_HEIGHT, zoom: viewport.zoom },
+      { duration: 650 }
+    );
+  }, [suggestions.nodes, ghostSizes, gapsOpen]);
 
   // Dimension changes for ghosts are kept here; everything else goes to node
   // state as before. Splitting them keeps a measurement of something that is not
@@ -885,6 +943,10 @@ function CanvasEditor({ user, record, onExit }) {
     setGapsOpen(true);
     setGapError(null);
     setGapsBusy(true);
+    // Gap ids are built from the kind, position and title, so a rescan that finds
+    // the same hole produces the same id. Without this, the second scan's
+    // suggestions would be treated as ones already shown and never framed.
+    framedGhostIds.current = new Set();
     try {
       const { gaps } = await findGaps({
         title,

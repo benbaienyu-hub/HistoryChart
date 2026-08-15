@@ -439,6 +439,19 @@ over the top hides exactly the thing you are being asked to judge. It says why
 Lacuna thinks it is missing, and offers **Add to canvas**, **Test me**, and
 **Dismiss**.
 
+**They appear the moment the scan answers** — it is one request for the whole
+canvas, so every gap is found at once and drawn at once, with no second step.
+The canvas then moves to them, framed together with the blocks they sit between
+and clear of the gaps drawer. Without that, "immediately" is only true in the
+DOM: on anything bigger than a screenful, a new suggestion usually lands off the
+side or behind the panel, and you would have to go looking for the thing that
+was supposed to be showing itself to you.
+
+Where a suggestion cannot fit at the midpoint, it moves **sideways**, never down.
+The height is what carries the meaning: level with the space between two blocks
+still reads as *between them* however far out it is, while below both of them
+reads as *after* — a different claim.
+
 **Only *missing* gaps become blocks.** A wrong or thin claim is about a block
 that already exists — there is nothing to put on the canvas between anything,
 and a ghost block saying "this claim is wrong" would misrepresent what it is.

@@ -71,19 +71,28 @@ function placeOne(gap, byId, fallbackIndex, bounds) {
 
 // Nudge a position until it is not sitting on top of something. Cheap and
 // bounded — this is a hint about where to look, not a layout engine.
+//
+// Sideways, as far as it takes. The height is what carries the meaning: a ghost
+// level with the space between two blocks still reads as being between them
+// however far out it is, while one pushed *below* both of them does not — it
+// reads as coming after. Dropping down is the last resort, for a canvas with no
+// room left beside the chain at all.
 function unstack(position, occupied) {
   const clash = (p) =>
     occupied.some(
       (other) => Math.abs(other.x - p.x) < BLOCK_W * 0.8 && Math.abs(other.y - p.y) < BLOCK_H * 0.6
     );
 
-  let placed = { ...position };
-  for (let attempt = 0; attempt < 8 && clash(placed); attempt += 1) {
-    // Sideways first: a ghost pushed down between two blocks stops reading as
-    // "between them", while one pushed right still does.
-    placed = attempt % 2 === 0
-      ? { x: placed.x + BLOCK_W * 0.85, y: placed.y }
-      : { x: position.x, y: placed.y + BLOCK_H * 0.7 };
+  if (!clash(position)) return position;
+
+  for (let step = 1; step <= 6; step += 1) {
+    const aside = { x: position.x + BLOCK_W * 0.85 * step, y: position.y };
+    if (!clash(aside)) return aside;
+  }
+
+  let placed = position;
+  for (let step = 1; step <= 4 && clash(placed); step += 1) {
+    placed = { x: position.x, y: position.y + BLOCK_H * 0.7 * step };
   }
   return placed;
 }
