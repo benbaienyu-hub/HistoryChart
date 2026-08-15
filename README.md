@@ -465,6 +465,11 @@ structure with a "leads to" relation instead — rearranging a graph the user bu
 on a guess about what they meant is not something to do quietly. It is one undo
 step either way.
 
+**Deleting an accepted block takes what is under it**, as deleting any block
+does — and after an insertion, what is under it is the rest of the chain. The ⋯
+menu says so before you commit (*"Delete block and the 3 below"*), and ⌘Z brings
+the whole thing back.
+
 Nothing about a ghost is real until you accept it. They cannot be dragged,
 selected, connected or saved, they never reach node state, and Tidy ignores
 them. **Dismissing lasts for the scan, not forever**: a later scan is looking at

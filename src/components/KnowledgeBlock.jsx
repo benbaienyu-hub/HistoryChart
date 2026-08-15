@@ -36,6 +36,7 @@ function KnowledgeBlock({ data, id }) {
     collapsed,
     childCount = 0,
     hiddenCount = 0,
+    subtreeCount = 0,
     isAddingChild,
     // What studying has established about this block. Null for a block with no
     // notes, which is not a card and so has no learning status to have.
@@ -202,6 +203,7 @@ function KnowledgeBlock({ data, id }) {
           id={id}
           category={category}
           unsure={unsure}
+          subtreeCount={subtreeCount}
           onFieldChange={onFieldChange}
           onRename={startLabelEdit}
           onAddImages={onAddImages}

@@ -131,6 +131,20 @@ describe('withVisibility', () => {
     expect(byId(out.nodes, 'root').data.hiddenCount).toBe(0);
   });
 
+  it('reports the whole subtree on every node, collapsed or not', () => {
+    // What deleting a block would take with it. Unlike hiddenCount this does not
+    // depend on whether the branch happens to be folded — the delete does not
+    // either, and the menu has to be able to say the number out loud.
+    const out = withVisibility(nodes, edges);
+    expect(byId(out.nodes, 'root').data.subtreeCount).toBe(5);
+    expect(byId(out.nodes, 'a').data.subtreeCount).toBe(3);
+    expect(byId(out.nodes, 'a2').data.subtreeCount).toBe(1);
+    expect(byId(out.nodes, 'b').data.subtreeCount).toBe(0);
+
+    const folded = withVisibility(collapse(nodes, 'a'), edges);
+    expect(byId(folded.nodes, 'a').data.subtreeCount).toBe(3);
+  });
+
   it('hides an edge when either end is hidden', () => {
     const out = withVisibility(collapse(nodes, 'a'), edges);
     const hiddenEdges = out.edges.filter((e) => e.hidden).map((e) => e.id).sort();

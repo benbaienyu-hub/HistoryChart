@@ -20,7 +20,16 @@ const ITEM =
   'flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] text-ink hover:bg-hover';
 const ICON = 'h-3.5 w-3.5 shrink-0 text-subink';
 
-export default function BlockMenu({ id, category, unsure, onFieldChange, onRename, onAddImages, onDelete }) {
+export default function BlockMenu({
+  id,
+  category,
+  unsure,
+  subtreeCount = 0,
+  onFieldChange,
+  onRename,
+  onAddImages,
+  onDelete,
+}) {
   const [open, setOpen] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const wrapper = useRef(null);
@@ -199,6 +208,11 @@ export default function BlockMenu({ id, category, unsure, onFieldChange, onRenam
 
                 <div className="my-1 h-px bg-line" />
 
+                {/* Deleting takes the whole subtree, which is a surprise worth
+                    spending a few words on — most of all for a block sitting
+                    mid-chain, where what is "beneath" it is the rest of your
+                    argument rather than anything you filed under it. ⌘Z brings
+                    it all back, but only if you notice in time to press it. */}
                 <button
                   type="button"
                   role="menuitem"
@@ -206,7 +220,9 @@ export default function BlockMenu({ id, category, unsure, onFieldChange, onRenam
                   className={`${ITEM} text-danger hover:bg-danger-bg`}
                 >
                   <span className={`${ICON} text-center text-[13px] leading-none text-danger`}>×</span>
-                  Delete block
+                  {subtreeCount > 0
+                    ? `Delete block and the ${subtreeCount} below`
+                    : 'Delete block'}
                 </button>
               </>
             )}

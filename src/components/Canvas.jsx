@@ -557,18 +557,7 @@ function CanvasEditor({ user, record, onExit }) {
 
       setNodes((prev) => [
         ...prev,
-        {
-          id: newId,
-          type: 'knowledge',
-          position: { x: newX, y: parent.position.y + LEVEL_HEIGHT },
-          data: {
-            ...NEW_BLOCK_FIELDS,
-            label,
-            parentId,
-            isRoot: false,
-            ...stable,
-          },
-        },
+        makeNode({ id: newId, x: newX, y: parent.position.y + LEVEL_HEIGHT, label, parentId }),
       ]);
       setEdges((prev) => [...prev, makeEdge(parentId, newId)]);
       setAddingChildId(null);
@@ -732,6 +721,10 @@ function CanvasEditor({ user, record, onExit }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [undo, redo]);
 
+  // The only place a block is built. `stable` last and NEW_BLOCK_FIELDS nowhere
+  // else, so a new creation path cannot forget the dispatchers — a block without
+  // them renders normally and then ignores every control on it, which is a
+  // miserable thing to debug and has happened once already.
   const makeNode = useCallback(
     ({ id, x, y, label, parentId, extra = {} }) => ({
       id,
@@ -1022,19 +1015,18 @@ function CanvasEditor({ user, record, onExit }) {
       ...prev.map((n) =>
         n.id === plan.reparent ? { ...n, data: { ...n.data, parentId: id, isRoot: false } } : n
       ),
-      {
+      // Through makeNode, which is the only thing that attaches the shared
+      // dispatchers. Built by hand, the block arrived with no onDelete, no
+      // onNotesChange and no onExpand — every control on it dead until a reload
+      // rehydrated it from the server.
+      makeNode({
         id,
-        type: 'knowledge',
-        position,
-        data: {
-          ...NEW_BLOCK_FIELDS,
-          label: gap.title,
-          notes: appendPoints('', gap.fill),
-          aiFilled: true,
-          parentId: plan.parentId,
-          isRoot: plan.isRoot,
-        },
-      },
+        x: position.x,
+        y: position.y,
+        label: gap.title,
+        parentId: plan.parentId,
+        extra: { notes: appendPoints('', gap.fill), aiFilled: true },
+      }),
     ]);
 
     setEdges((prev) => {

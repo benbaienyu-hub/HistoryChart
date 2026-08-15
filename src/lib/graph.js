@@ -62,18 +62,27 @@ export function withVisibility(nodes, edges) {
   const hidden = hiddenIds(nodes);
 
   const decoratedNodes = nodes.map((node) => {
+    const subtreeCount = descendantIds(nodes, node.id).length;
     const childCount = childCountOf(nodes, node.id);
-    const hiddenCount = node.data.collapsed ? hiddenCountOf(nodes, node.id) : 0;
+    const hiddenCount = node.data.collapsed ? subtreeCount : 0;
     const isHidden = hidden.has(node.id);
 
     if (
       node.hidden === isHidden &&
       node.data.childCount === childCount &&
-      node.data.hiddenCount === hiddenCount
+      node.data.hiddenCount === hiddenCount &&
+      node.data.subtreeCount === subtreeCount
     ) {
       return node; // unchanged — keep the reference so React can bail out
     }
-    return { ...node, hidden: isHidden, data: { ...node.data, childCount, hiddenCount } };
+    return {
+      ...node,
+      hidden: isHidden,
+      // `subtreeCount` regardless of collapse, because deleting a block takes
+      // everything beneath it and the menu has to be able to say how much that
+      // is — folded or not.
+      data: { ...node.data, childCount, hiddenCount, subtreeCount },
+    };
   });
 
   // An edge is hidden when either end is.
