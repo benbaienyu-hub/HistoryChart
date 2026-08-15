@@ -136,19 +136,39 @@ export async function expandTopic({ topic, level, context, maxSubtopics }) {
   };
 }
 
-// Called by "Fill my knowledge": review what the user wrote, fill gaps, and
-// suggest what's missing.
-export async function fillKnowledge({ topic, notes, childLabels }) {
-  const result = await requestKnowledge({ topic, notes, childLabels });
-  const hasNotes = (notes ?? '').trim().length > 0;
+// "Find my gaps": one request for the whole canvas, answered with a list of holes
+// rather than with finished notes. Replaced "Fill my knowledge", which handed back
+// a written answer — reading a good answer feels like learning and isn't.
+export async function findGaps({ title, nodes }) {
+  let response;
+  try {
+    response = await fetch('/api/gaps', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title, nodes }),
+    });
+  } catch (cause) {
+    throw new Error(
+      'Could not reach the server. If you are running Lacuna yourself, check that ' +
+        'terminal for a crash; otherwise it is a connection problem, not an AI one.',
+      { cause }
+    );
+  }
 
-  return {
-    // Never overwrite notes the user actually wrote.
-    filledNotes: hasNotes ? null : result.summary || null,
-    correction: result.correction || null,
-    suggestedSubtopics: normalizeSubtopics(result.subtopics),
-    placeholder: Boolean(result.placeholder),
-    reason: result.reason ?? null,
-    refused: Boolean(result.refused),
-  };
+  const body = await response.json().catch(() => ({}));
+
+  if (response.status === 503) {
+    // The server has just told us there is no usable key; whatever the page
+    // believed at load is out of date.
+    forgetAiStatus();
+    const error = new Error(body.error ?? 'No API key configured.');
+    error.code = 'NO_API_KEY';
+    throw error;
+  }
+  if (!response.ok) {
+    throw new Error(body.error ?? `Request failed (${response.status})`);
+  }
+
+  return { gaps: Array.isArray(body.gaps) ? body.gaps : [], refused: Boolean(body.refused) };
 }

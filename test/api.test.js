@@ -1016,3 +1016,30 @@ describe('an account’s own AI key', () => {
     expect((await client().call('DELETE', '/api/account/ai')).status).toBe(401);
   });
 });
+
+describe('finding gaps', () => {
+  // The route itself, through HTTP. What the model says is stubbed elsewhere; what
+  // matters here is who may ask and what happens when nothing can answer.
+  it('needs a session, like everything else that spends the key', async () => {
+    const { status } = await client().call('POST', '/api/gaps', { nodes: [{ id: 'b1' }] });
+    expect(status).toBe(401);
+  });
+
+  it('refuses an empty canvas rather than spending a request on nothing', async () => {
+    const ben = await signedUp('ben@example.com');
+    const { status, json } = await ben.call('POST', '/api/gaps', { title: 'Empty', nodes: [] });
+    expect(status).toBe(400);
+    expect(json.error).toMatch(/nothing on this canvas/i);
+  });
+
+  it('answers 503 with a code when there is no key to review with', async () => {
+    // The client uses this to say why, and to drop its cached "AI is available".
+    const ben = await signedUp('ben@example.com');
+    const { status, json } = await ben.call('POST', '/api/gaps', {
+      title: 'Suez',
+      nodes: [{ id: 'b1', data: { label: 'Nationalisation', notes: '- 1956' } }],
+    });
+    expect(status).toBe(503);
+    expect(json.code).toBe('NO_API_KEY');
+  });
+});

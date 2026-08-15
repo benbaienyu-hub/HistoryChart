@@ -1,11 +1,8 @@
 import { readFileSync } from 'node:fs';
-import OpenAI from 'openai';
 import { parseEnv } from '../scripts/keyDiagnostics.js';
 import { splitPoints } from '../src/lib/deck.js';
 import {
-  DEFAULT_MODEL,
   configProblem,
-  credentialProblem,
   credentialsForUser,
   mockEnabled,
   readBaseUrl,
@@ -13,6 +10,7 @@ import {
   requireOwnKey,
   serverCredentials,
 } from './aiConfig.js';
+import { callModel } from './modelCall.js';
 import { currentUser } from './authRoutes.js';
 
 // Server-side only. The API key must never reach the browser, so every model
@@ -79,6 +77,11 @@ const KNOWLEDGE_SCHEMA = {
   required: ['summary', 'correction', 'subtopics'],
   additionalProperties: false,
 };
+
+// The same shape in words, for the format tiers that have no schema to enforce it.
+const SHAPE = `{"summary": "…", "correction": "…", "subtopics": [{"label": "…", "detail": "…"}]}
+Every field is required. Use an empty string for "summary" or "correction" when they do not apply, and an empty array for "subtopics".
+"summary" and each "detail" are dot points: one point per line, each line starting with "- ", written as \\n inside the JSON string. "correction" is ordinary prose.`;
 
 // How each depth in the "Make a graph" menu should be written. The level governs
 // the register, not the size — Concise and Detailed read the same way and differ
@@ -254,48 +257,9 @@ export function buildPrompt({ topic, notes, childLabels, level, context, maxSubt
 //
 // Whatever works is remembered per model, so the cost is one wasted request the
 // first time and nothing after that.
-const FORMAT_TIERS = ['json_schema', 'json_object', 'none'];
-const workingTierByModel = new Map();
-
-function responseFormatFor(tier) {
-  if (tier === 'json_schema') {
-    return {
-      response_format: {
-        type: 'json_schema',
-        json_schema: { name: 'knowledge', strict: true, schema: KNOWLEDGE_SCHEMA },
-      },
-    };
-  }
-  if (tier === 'json_object') return { response_format: { type: 'json_object' } };
-  return {};
-}
-
-// Only the schema guarantees the shape, so the plainer tiers have to state it.
-const SHAPE_INSTRUCTION = `Reply with JSON and nothing else — no prose, no code fences — in exactly this shape:
-{"summary": "…", "correction": "…", "subtopics": [{"label": "…", "detail": "…"}]}
-Every field is required. Use an empty string for "summary" or "correction" when they do not apply, and an empty array for "subtopics".
-"summary" and each "detail" are dot points: one point per line, each line starting with "- ", written as \\n inside the JSON string. "correction" is ordinary prose.`;
-
-// A provider refusing the format is a reason to try a plainer one. Anything else
-// — a bad key, an unknown model, a rate limit — is not, and must surface.
-export function isFormatUnsupported(error) {
-  if (error?.status !== 400) return false;
-  return /response.?format|json.?schema|json.?object|structured.output/i.test(
-    String(error?.message ?? '')
-  );
-}
-
-// The plainest tier may wrap its JSON in prose or a code fence.
-export function parseKnowledgeJson(text) {
-  const raw = String(text ?? '').trim();
-  const unfenced = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  const start = unfenced.indexOf('{');
-  const end = unfenced.lastIndexOf('}');
-  if (start === -1 || end <= start) {
-    throw new Error('The model did not return JSON.');
-  }
-  return JSON.parse(unfenced.slice(start, end + 1));
-}
+// The plainest tier may wrap its JSON in prose or a code fence. Kept as a named
+// export here because it was this module's before it was shared.
+export { isFormatUnsupported, parseJsonReply as parseKnowledgeJson } from './modelCall.js';
 
 // The prompt asks for dot points, and the schema's descriptions repeat it, but
 // compliance isn't a guarantee — the plainer format tiers have no schema at all,
@@ -337,78 +301,18 @@ export async function generateKnowledge(
   if (mockEnabled())
     return mockKnowledge({ topic, notes, level: level ?? DEFAULT_LEVEL, context, maxSubtopics });
 
+  // The credential guards live in callModel, so both routes refuse the same way.
   const creds = credentials ?? serverCredentials({ evenWithoutKey: true });
 
-  const problem = credentialProblem(creds);
-  if (problem) {
-    const error = new Error(problem);
-    error.code = 'CONFIG';
-    throw error;
-  }
-
-  if (!creds.apiKey) {
-    const error = new Error(
-      creds.requiresOwnKey
-        ? 'This server requires each account to use its own API key.'
-        : 'OPENAI_API_KEY is not set'
-    );
-    error.code = 'NO_API_KEY';
-    error.requiresOwnKey = Boolean(creds.requiresOwnKey);
-    throw error;
-  }
-
-  const { apiKey, baseUrl: baseURL } = creds;
-  const client = new OpenAI(baseURL ? { apiKey, baseURL } : { apiKey });
-  const model = creds.model ?? DEFAULT_MODEL;
-
-  const prompt = buildPrompt({ topic, notes, childLabels, level, context, maxSubtopics });
-  const remembered = workingTierByModel.get(model);
-  const tiers = remembered ? [remembered] : FORMAT_TIERS;
-
-  let lastError;
-  for (const tier of tiers) {
-    try {
-      const completion = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: 'system', content: SYSTEM },
-          {
-            role: 'user',
-            content: tier === 'json_schema' ? prompt : `${prompt}\n\n${SHAPE_INSTRUCTION}`,
-          },
-        ],
-        ...responseFormatFor(tier),
-      });
-
-      const message = completion.choices?.[0]?.message;
-
-      // With structured outputs the model can decline instead of answering; that
-      // arrives as a `refusal` string rather than an error.
-      if (message?.refusal) {
-        const error = new Error(message.refusal);
-        error.code = 'REFUSED';
-        throw error;
-      }
-
-      const result = shapeResult(parseKnowledgeJson(message?.content), maxSubtopics);
-
-      if (remembered !== tier) {
-        workingTierByModel.set(model, tier);
-        if (tier !== 'json_schema') {
-          console.log(
-            `[knowledge] "${model}" does not support json_schema; using ${tier} for it instead.`
-          );
-        }
-      }
-      return result;
-    } catch (error) {
-      lastError = error;
-      // A refusal is the model's answer, not a format problem: do not retry it.
-      if (error.code === 'REFUSED' || !isFormatUnsupported(error)) throw error;
-    }
-  }
-
-  throw lastError;
+  const parsed = await callModel({
+    credentials: creds,
+    system: SYSTEM,
+    prompt: buildPrompt({ topic, notes, childLabels, level, context, maxSubtopics }),
+    schemaName: 'knowledge',
+    schema: KNOWLEDGE_SCHEMA,
+    shape: SHAPE,
+  });
+  return shapeResult(parsed, maxSubtopics);
 }
 
 function readBody(req) {

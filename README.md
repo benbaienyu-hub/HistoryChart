@@ -2,8 +2,8 @@
 
 A knowledge canvas. Search a topic to drop a block on an infinite canvas, write
 notes on it, branch into sub-topics, connect blocks with labelled relationships —
-then let the AI fill the gaps, correct what you got wrong, and quiz you on the
-rest.
+then let the AI find the gaps in what you wrote, and choose for each one whether
+to be tested on it, hinted at it, or handed it.
 
 A *lacuna* is a gap — specifically a missing passage in a manuscript. Finding the
 ones in your own notes is the point of the app.
@@ -383,14 +383,69 @@ With a key set:
   model call at all. That is deliberate: the block is a blank page for your own
   account of the topic. Writing it yourself is the part that makes the app worth
   using.
-- **Fill my knowledge** is the other half. It reads what you actually wrote,
-  flags factual errors, fills notes you left blank, and adds the sub-topics you
-  missed. So the order is: type a topic, write what you know, then ask what you
-  got wrong and left out.
+- **Find my gaps** is the other half, and the one the app is named after. It
+  reads what you actually wrote and tells you what is wrong with it — it does
+  not write your notes for you. See below. So the order is: type a topic, write
+  what you know, then ask what you got wrong and left out.
 
-Without a key, "Make a graph" is disabled (hover it for why), the toolbar
-button reads "(no key)", and Fill inserts placeholder text. Enter is unaffected,
-since it never calls out.
+Without a key, "Make a graph" is disabled (hover it for why) and the toolbar
+button reads "(no key)". Enter is unaffected, since it never calls out.
+
+### Find my gaps
+
+The button used to say *Fill my knowledge*, and it did exactly that: one click
+and the notes came back finished. That is the wrong shape for this app. Being
+handed a paragraph you didn't write teaches nothing, and it hides the only piece
+of information worth having — **which** part you didn't know.
+
+So the scan now stops one step earlier. It reports the holes and lets you decide
+what to do about each one.
+
+**Three kinds, shown most alarming first:**
+
+| | | Why it ranks there |
+| --- | --- | --- |
+| ⚠️ | **Incorrect** — a claim that looks factually wrong | Believing something false is worse than not having written it down |
+| 🔴 | **Missing** — an important concept that isn't here at all | You can't revise what you never wrote |
+| 🟡 | **Incomplete** — mentioned, but not explained enough | The most common state of real notes |
+
+"Incorrect" is held to a deliberately higher bar in the prompt: the model is
+told to flag only a claim it is confident is wrong. Being wrongly told you are
+wrong is the worst outcome available here, because you go and "correct"
+something that was already right.
+
+**Three things you can do with each gap**, in this order on the card:
+
+1. **Test me** — asks you the question, and keeps the answer behind a second
+   click. You find out whether you actually knew it.
+2. **Hint** — a nudge towards the answer. The prompt forbids the hint from
+   containing the answer, which is the only thing that makes it different from
+   the next button.
+3. **Fill gap** — writes the point into your notes.
+
+The order is the argument. Being handed the answer is the option that teaches
+least, so it sits last rather than first.
+
+**Applying a gap appends; it never rewrites.** A correction contradicts a line
+*you* wrote, and a model is sometimes wrong about being right — so the old line
+stays and the new point goes underneath it, with the card saying plainly that
+deleting the line it replaces is your call. For that reason the action on an
+incorrect gap reads **Add correction** rather than "Fill gap": the note isn't
+being completed, it's being argued with.
+
+A gap the model can't pin to one block (*"nothing here covers the economics"*)
+is marked as belonging to the whole canvas, and filling it creates a new root
+block instead of editing an existing one. These are often the most useful ones.
+
+**A scan that finds nothing is a real answer**, not a failure — the panel says
+so rather than showing an error, and the prompt explicitly tells the model that
+an empty list is correct and forbids padding it out. The whole scan is **one
+request** regardless of canvas size (capped at 40 blocks, 900 characters each,
+and at most 12 gaps reported, because a wall of gaps is not actionable).
+
+With `OPENAI_MOCK=1` and no key at all, the scan returns one sample of each
+kind, every one of them prefixed `[offline sample]` so it can never be mistaken
+for a real review of your notes.
 
 ## Reading and writing a block
 
@@ -716,8 +771,12 @@ hardcode white or black and both themes stay in sync.
 | `src/components/StudySetup.jsx` | The what-and-how screen before a session |
 | `server/reviewRoutes.js` | Per-user review state; the server owns the scheduling |
 | `src/lib/theme.js` | Light/dark theme store and `useTheme` hook |
-| `src/lib/aiFill.js` | Client side of the AI calls (talks to `/api/knowledge`) |
-| `server/knowledgeRoutes.js` | Server side — the only place the API key is read |
+| `src/lib/aiFill.js` | Client side of the AI calls (`/api/knowledge`, `/api/gaps`) |
+| `server/knowledgeRoutes.js` | Graph generation server-side |
+| `server/modelCall.js` | The one place a model is actually called, and the JSON-format fallback |
+| `src/lib/gaps.js` | Gap logic — the canvas digest, the three kinds, appending a fill |
+| `server/gapRoutes.js` | The gap prompt and schema — what "find my gaps" asks for |
+| `src/components/GapPanel.jsx` | The gaps drawer: Test me / Hint / Fill gap per gap |
 | `src/lib/api.js` | Client side of the account API, including uploads |
 | `src/lib/imageFiles.js` | Getting images out of a picker, a drag, or a paste |
 | `src/lib/canvasShape.js` | What a canvas looks like when stored — the persistence allowlist |

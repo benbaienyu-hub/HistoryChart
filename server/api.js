@@ -34,6 +34,7 @@ import {
   handleReviewList,
   handleSubmitReviews,
 } from './reviewRoutes.js';
+import { handleFindGaps } from './gapRoutes.js';
 import { handleHealth } from './healthRoutes.js';
 import { matchPath, send } from './http.js';
 
@@ -55,6 +56,9 @@ const ROUTES = [
   { method: 'GET', path: '/api/account/ai', handler: handleGetAiSettings, auth: true },
   { method: 'PUT', path: '/api/account/ai', handler: handleSaveAiSettings, auth: true },
   { method: 'DELETE', path: '/api/account/ai', handler: handleDeleteAiSettings, auth: true },
+
+  // In the table, so it inherits the session check rather than restating it.
+  { method: 'POST', path: '/api/gaps', handler: handleFindGaps, auth: true },
 
   { method: 'GET', path: '/api/canvases', handler: handleList, auth: true },
   { method: 'POST', path: '/api/canvases', handler: handleCreate, auth: true },

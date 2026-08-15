@@ -26,7 +26,7 @@ missing, and test recall.
 Lacuna is one canvas that does all three.
 
 - **Write first.** Type a topic, get a blank block, and write what you already know. This order is deliberate — the writing is the learning.
-- **Then find the gaps.** *Fill my knowledge* reads what you actually wrote, flags factual errors, fills the notes you left blank, and adds the sub-topics you missed. *Make a graph* generates a three-level map of a topic at one of four depths when you're starting cold.
+- **Then find the gaps.** *Find my gaps* reads what you actually wrote and reports three kinds of hole — **incorrect** (a claim that looks factually wrong), **missing** (a concept that isn't there at all), and **incomplete** (mentioned but not explained). For each one you choose: *Test me*, *Hint*, or *Fill gap*. It stops one step short of writing your notes, on purpose. *Make a graph* generates a three-level map of a topic at one of four depths when you're starting cold.
 - **Study the same artifact.** Every block with notes is a card. Notes are split into points, and each card is graded **per point** rather than pass/fail — nobody recalls a paragraph verbatim, and being marked wrong for failing to is not a useful signal. The session summary lists the *specific* points that got away.
 
 The name is the thesis. A *lacuna* is a missing passage in a manuscript; the logo is
@@ -95,14 +95,14 @@ from the branch's own reply. At roughly 800 input and 500 output tokens per requ
 | Groq `llama-3.3-70b` ($0.59/$0.79 per M) | 4,800 tok | 3,000 tok | **$0.0052** |
 | OpenAI's cheapest tier ($0.20/$1.20 per M) | 4,800 tok | 3,000 tok | **$0.0046** |
 
-**About half a cent per generated graph.** A *Fill my knowledge* call is one request,
-about $0.001.
+**About half a cent per generated graph.** A *Find my gaps* scan is one request
+regardless of canvas size, about $0.001.
 
 Worth noting what the architecture buys: one request per block would cost $0.018 per
 graph. Building children from their parent's response is **3.5× cheaper** — a design
 decision that turns out to be an economic one.
 
-**A heavy Plus subscriber** — 40 graphs and 150 fills a month — costs $0.34 in AI.
+**A heavy Plus subscriber** — 40 graphs and 150 gap scans a month — costs $0.34 in AI.
 Against $29/yr (about $2.35/month after payment processing), that is a **~85% gross
 margin**, and a user would have to be 7× heavier than that before a subscription
 stopped paying for itself.

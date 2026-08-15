@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import ReactFlow, { Background, BackgroundVariant, Controls, MiniMap } from 'reactflow';
 import { useNodesState, useEdgesState } from 'reactflow';
 import KnowledgeBlock from './KnowledgeBlock';
 import ShareDialog from './ShareDialog';
+import GapPanel from './GapPanel';
 import RelationDialog from './RelationDialog';
 import GraphLevelMenu from './GraphLevelMenu';
 import BlockDetail from './BlockDetail';
 import StudyMode from './StudyMode';
-import { describeAiStatus, expandTopic, fetchAiStatus, fillKnowledge } from '../lib/aiFill';
+import { describeAiStatus, expandTopic, fetchAiStatus, findGaps } from '../lib/aiFill';
 import {
   ApiError,
   deleteImage,
@@ -21,6 +22,7 @@ import {
 import { serializeCanvas as serialize } from '../lib/canvasShape';
 import { countDue } from '../lib/review';
 import { categoryColor } from '../lib/categories';
+import { appendPoints } from '../lib/gaps';
 import { autoLayout } from '../lib/layout';
 import { descendantIds, withVisibility } from '../lib/graph';
 import { graphPlan } from '../lib/graphLevels';
@@ -124,7 +126,13 @@ function CanvasEditor({ user, record, onExit }) {
   const [editingTitle, setEditingTitle] = useState(false);
   const [addingChildId, setAddingChildId] = useState(null);
   const [searchValue, setSearchValue] = useState('');
-  const [isFilling, setIsFilling] = useState(false);
+  const [gapsOpen, setGapsOpen] = useState(false);
+  const [gaps, setGaps] = useState([]);
+  const [gapsBusy, setGapsBusy] = useState(false);
+  const [gapError, setGapError] = useState(null);
+  // Which gaps have been applied in this scan, so the button can say "Added ✓"
+  // rather than silently doing it twice.
+  const [filledGapIds, setFilledGapIds] = useState(() => new Set());
   const [showShare, setShowShare] = useState(false);
   // The dialog edits the grant list, and hands back the canvas the server
   // returned, so the list on screen is always what the server actually stored.
@@ -764,111 +772,90 @@ function CanvasEditor({ user, record, onExit }) {
 
   // Attach suggested subtopics as dashed "AI suggested" children of `parentId`,
   // skipping labels already on that branch.
-  function appendSuggestions(parentId, subtopics) {
-    if (subtopics.length === 0) return;
-    const parent = liveRef.current.nodes.find((n) => n.id === parentId);
-    if (!parent) return;
-
-    const siblings = liveRef.current.nodes.filter((n) => n.data.parentId === parentId);
-    const taken = new Set(siblings.map((s) => s.data.label.toLowerCase()));
-    const fresh = subtopics.filter((s) => !taken.has(s.label.toLowerCase()));
-    if (fresh.length === 0) return;
-
-    let nextX = siblings.length
-      ? Math.max(...siblings.map((s) => s.position.x)) + CHILD_SPACING
-      : parent.position.x;
-
-    const created = fresh.map(({ label, detail }) => {
-      const node = {
-        id: crypto.randomUUID(),
-        type: 'knowledge',
-        position: { x: nextX, y: parent.position.y + LEVEL_HEIGHT },
-        data: {
-          ...NEW_BLOCK_FIELDS,
-          label,
-          notes: detail,
-          aiFilled: Boolean(detail),
-          parentId,
-          isRoot: false,
-          aiSuggested: true,
-          ...stable,
-        },
-      };
-      nextX += CHILD_SPACING;
-      return node;
-    });
-
-    setNodes((prev) => [...prev, ...created]);
-    setEdges((prev) => [...prev, ...created.map((n) => makeEdge(parentId, n.id))]);
+  // "Find my gaps": one request for the whole canvas, answered with a list of holes
+  // rather than with written notes. What happens to each hole is the user's choice —
+  // see GapPanel for why the buttons are in the order they are.
+  async function handleFindGaps() {
+    setGapsOpen(true);
+    setGapError(null);
+    setGapsBusy(true);
+    try {
+      const { gaps } = await findGaps({
+        title,
+        nodes: liveRef.current.nodes.map((n) => ({ id: n.id, data: n.data })),
+      });
+      setGaps(gaps);
+      // A fresh scan invalidates what was applied from the last one: the ids are
+      // per-scan, and a gap you filled may legitimately come back if it is still
+      // thin.
+      setFilledGapIds(new Set());
+    } catch (error) {
+      setGapError(error.message);
+      if (error.code === 'NO_API_KEY') fetchAiStatus({ force: true }).then(setAiStatus);
+    } finally {
+      setGapsBusy(false);
+    }
   }
 
-  async function handleFillKnowledge() {
-    setIsFilling(true);
+  // Applying a gap appends points; it never rewrites what is there. For a
+  // correction that is the whole point — the model is sometimes wrong about being
+  // right, and deleting somebody's sentence on that basis is not this app's call.
+  function handleFillGap(gap) {
+    if (gap.fill.length === 0) return;
     pushHistory();
-    const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
 
-    for (const root of roots) {
-      const childLabels = liveRef.current.nodes
-        .filter((n) => n.data.parentId === root.id)
-        .map((n) => n.data.label);
-
-      let result;
-      try {
-        result = await fillKnowledge({
-          topic: root.data.label,
-          notes: root.data.notes,
-          childLabels,
-        });
-      } catch (error) {
-        setNodes((prev) =>
-          prev.map((n) =>
-            n.id === root.id
-              ? { ...n, data: { ...n.data, aiCorrection: `Couldn’t reach AI: ${error.message}` } }
-              : n
-          )
-        );
-        continue;
-      }
-
-      // Placeholders are not an answer, and quietly writing them into somebody's
-      // notes looks like the AI produced nonsense. Say what the server said —
-      // "no key configured" and "bring your own" need different actions — and
-      // leave the notes alone.
-      if (result.placeholder) {
-        // Resolved before the update, because the updater passed to setNodes is
-        // not async.
-        const why = result.reason ?? describeAiStatus(await fetchAiStatus());
-        setNodes((prev) =>
-          prev.map((n) =>
-            n.id === root.id ? { ...n, data: { ...n.data, aiCorrection: why } } : n
-          )
-        );
-        continue;
-      }
-
+    if (gap.blockId) {
       setNodes((prev) =>
         prev.map((n) =>
-          n.id === root.id
+          n.id === gap.blockId
             ? {
                 ...n,
                 data: {
                   ...n.data,
-                  notes: result.filledNotes ?? n.data.notes,
-                  aiFilled: result.filledNotes ? true : n.data.aiFilled,
-                  aiCorrection: result.correction ?? n.data.aiCorrection,
+                  notes: appendPoints(n.data.notes, gap.fill),
+                  aiFilled: true,
                 },
               }
             : n
         )
       );
-
-      appendSuggestions(root.id, result.suggestedSubtopics);
+    } else {
+      // A gap belonging to no block is a subject the canvas never covers, so it
+      // becomes a block of its own rather than being wedged into an unrelated one.
+      const roots = liveRef.current.nodes.filter((n) => n.data.parentId === null);
+      const x = roots.length
+        ? Math.max(...roots.map((n) => n.position.x)) + CHILD_SPACING
+        : 0;
+      setNodes((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          type: 'knowledge',
+          position: { x, y: roots.length ? roots[0].position.y : 0 },
+          data: {
+            ...NEW_BLOCK_FIELDS,
+            label: gap.title,
+            notes: appendPoints('', gap.fill),
+            aiFilled: true,
+            parentId: null,
+            isRoot: true,
+          },
+        },
+      ]);
     }
 
-    // The status may have changed underneath this run — a 503 clears the cache —
-    // so refresh the indicator rather than leaving it saying what it said before.
-    fetchAiStatus({ force: true }).then(setAiStatus);
-    setIsFilling(false);
+    setFilledGapIds((prev) => new Set(prev).add(gap.id));
+  }
+
+  // Clicking the block name on a gap card brings it into view, which matters once
+  // the canvas is bigger than the screen.
+  function handleJumpToBlock(blockId) {
+    const node = liveRef.current.nodes.find((n) => n.id === blockId);
+    if (!node || !flowRef.current) return;
+    flowRef.current.setCenter(node.position.x + 160, node.position.y + 120, {
+      zoom: 1,
+      duration: 400,
+    });
   }
 
   const labelOf = useCallback(
@@ -1161,12 +1148,12 @@ function CanvasEditor({ user, record, onExit }) {
 
         <button
           type="button"
-          onClick={handleFillKnowledge}
-          disabled={isFilling || nodes.length === 0}
+          onClick={handleFindGaps}
+          disabled={gapsBusy || nodes.length === 0}
           title={describeAiStatus(aiStatus)}
           className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
         >
-          {isFilling ? 'Thinking…' : '✨ Fill my knowledge'}
+          {gapsBusy ? 'Reading…' : '🔍 Find my gaps'}
           {!aiReady && <span className="ml-1.5 opacity-70">(no key)</span>}
         </button>
       </div>
@@ -1229,6 +1216,21 @@ function CanvasEditor({ user, record, onExit }) {
           />
         )}
       </ReactFlow>
+
+      <AnimatePresence>
+        {gapsOpen && (
+          <GapPanel
+            gaps={gaps}
+            busy={gapsBusy}
+            error={gapError}
+            filledIds={filledGapIds}
+            onFill={handleFillGap}
+            onJump={handleJumpToBlock}
+            onRescan={handleFindGaps}
+            onClose={() => setGapsOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
       {showShare && (
         <ShareDialog

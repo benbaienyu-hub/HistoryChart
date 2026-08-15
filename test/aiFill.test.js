@@ -3,7 +3,7 @@ import {
   describeAiStatus,
   expandTopic,
   fetchAiStatus,
-  fillKnowledge,
+  findGaps,
   forgetAiStatus,
   isAiConfigured,
   normalizeSubtopics,
@@ -173,8 +173,9 @@ describe('the cached AI status', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ configured: false }), { status: 200 }));
 
     expect(await isAiConfigured()).toBe(true);
-    const filled = await fillKnowledge({ topic: 'Rome', notes: '' });
-    expect(filled.placeholder).toBe(true);
+    await expect(findGaps({ title: 'Rome', nodes: [{ id: 'b1' }] })).rejects.toMatchObject({
+      code: 'NO_API_KEY',
+    });
     // Not forced, and well inside the TTL — it re-asks because the 503 invalidated it.
     expect(await isAiConfigured()).toBe(false);
   });
@@ -194,10 +195,32 @@ describe('the cached AI status', () => {
           { status: 503 }
         )
     );
-    const filled = await fillKnowledge({ topic: 'Rome', notes: '' });
-    expect(filled.reason).toMatch(/bring their own API key/);
+    // The gap route throws — there is no useful partial answer to show — while the
+    // graph route degrades to placeholders, which is why they differ here.
+    await expect(findGaps({ title: 'Rome', nodes: [{ id: 'b1' }] })).rejects.toThrow(
+      /bring their own API key/
+    );
     const expanded = await expandTopic({ topic: 'Rome' });
     expect(expanded.reason).toMatch(/bring their own API key/);
+  });
+
+  it('sends the canvas to the gap route and returns the gaps', async () => {
+    const stub = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ gaps: [{ id: 'g1', kind: 'missing', title: 'A hole' }] }), {
+        status: 200,
+      })
+    );
+    const { gaps } = await findGaps({ title: 'Suez', nodes: [{ id: 'b1', data: {} }] });
+    expect(stub.mock.calls[0][0]).toBe('/api/gaps');
+    expect(JSON.parse(stub.mock.calls[0][1].body).title).toBe('Suez');
+    expect(gaps).toHaveLength(1);
+  });
+
+  it('tolerates a malformed answer rather than crashing the canvas', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ nonsense: true }), { status: 200 })
+    );
+    expect((await findGaps({ title: 'x', nodes: [] })).gaps).toEqual([]);
   });
 });
 
