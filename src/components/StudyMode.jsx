@@ -3,26 +3,47 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { categoryColor, categoryLabel } from '../lib/categories';
 import { buildDeck, flaggedCardCount, gradeCard, sessionTally } from '../lib/deck';
 import { countDue, describeDue, isDue, scheduleSummary } from '../lib/review';
+import { MASTERY, MASTERY_ORDER, countLevels, masteryFor, weakCardIds } from '../lib/mastery';
 import { gradeTyped } from '../lib/recall';
 import StudySetup from './StudySetup';
 
-export default function StudyMode({ nodes, canvasTitle, reviews = {}, onExit, onFinish }) {
+export default function StudyMode({
+  nodes,
+  canvasTitle,
+  reviews = {},
+  // A mastery count on the canvas was clicked: {label, ids}. The session is
+  // already scoped, so it opens on the first card instead of on a setup screen
+  // asking a question that has just been answered.
+  focus = null,
+  onExit,
+  onFinish,
+}) {
   const [seed, setSeed] = useState(1);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
-  const [restrictTo, setRestrictTo] = useState(null);
+  const [restrictTo, setRestrictTo] = useState(focus?.ids ?? null);
+  // Held in state rather than read from the prop: the buttons below can widen
+  // the deck mid-session, and a label still claiming "weak blocks" over a deck
+  // that is no longer only the weak ones would be a lie on screen.
+  const [focused, setFocused] = useState(focus);
   // The session starts on a setup screen rather than straight into a card: with
   // scheduling and two answer modes there is now a real choice to make, and
   // guessing it for the user would be worse than asking once.
-  const [setup, setSetup] = useState(null);
+  const [setup, setSetup] = useState(focus ? { scope: 'all', mode: 'check' } : null);
 
   const everything = useMemo(() => buildDeck(nodes, { flaggedOnly: false, seed: 1 }), [nodes]);
   const dueTotal = countDue(everything, reviews);
+  const weakCount = useMemo(() => weakCardIds(nodes, reviews).length, [nodes, reviews]);
 
   const deck = useMemo(() => {
     const built = buildDeck(nodes, { flaggedOnly, seed, restrictTo });
-    // "Due" is a filter over the same deck rather than a different deck, so the
+    // Scopes are filters over the same deck rather than different decks, so the
     // shuffle, the flag filter and the retry list all still apply.
-    return setup?.scope === 'due' ? built.filter((c) => isDue(reviews[c.id])) : built;
+    if (setup?.scope === 'due') return built.filter((c) => isDue(reviews[c.id]));
+    if (setup?.scope === 'weak') {
+      const weak = new Set(weakCardIds(nodes, reviews));
+      return built.filter((c) => weak.has(c.id));
+    }
+    return built;
   }, [nodes, flaggedOnly, seed, restrictTo, setup?.scope, reviews]);
 
   const [index, setIndex] = useState(0);
@@ -61,6 +82,10 @@ export default function StudyMode({ nodes, canvasTitle, reviews = {}, onExit, on
     setGrades([]);
     setDone(false);
     setScheduled(null);
+    // Every path that restarts also changes what the deck is — retry the missed
+    // ones, study everything again, toggle the flag filter — so the "weak
+    // blocks" label from the canvas stops applying at exactly this point.
+    setFocused(null);
     if (opts.reshuffle) setSeed((s) => s + 1);
   }, []);
 
@@ -153,6 +178,14 @@ export default function StudyMode({ nodes, canvasTitle, reviews = {}, onExit, on
         ✕ Close
       </button>
       <p className="min-w-0 truncate text-[13px] font-medium text-ink">{canvasTitle}</p>
+      {/* Arriving here from a mastery count skips the setup screen, so this is
+          the only thing saying what the deck is. Without it the session looks
+          like an ordinary one that has mysteriously lost most of its cards. */}
+      {focused && (
+        <span className="shrink-0 rounded-full border border-line2 px-2.5 py-1 text-[12px] text-subink">
+          {focused.label} blocks
+        </span>
+      )}
       {flaggedCount > 0 && (
         <button
           type="button"
@@ -181,6 +214,7 @@ export default function StudyMode({ nodes, canvasTitle, reviews = {}, onExit, on
         canvasTitle={canvasTitle}
         totalCards={everything.length}
         dueCount={dueTotal}
+        weakCount={weakCount}
         flaggedCount={flaggedCount}
         scope={pendingScope}
         mode={pendingMode}
@@ -199,6 +233,11 @@ export default function StudyMode({ nodes, canvasTitle, reviews = {}, onExit, on
 
   if (done) {
     const tally = sessionTally(grades);
+    // Where the cards just studied now stand. Computed from the rows the server
+    // sent back, so this and the canvas cannot disagree.
+    const standing = countLevels(
+      Object.fromEntries((scheduled ?? []).map((state) => [state.blockId, masteryFor(state)]))
+    );
     return (
       <div className="fixed inset-0 z-50 flex flex-col bg-canvas/95 backdrop-blur-xl">
         <div className="border-b border-line bg-surface px-5 py-3">{header}</div>
@@ -236,6 +275,29 @@ export default function StudyMode({ nodes, canvasTitle, reviews = {}, onExit, on
                     ) : null
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* The handover back to the canvas. Half the value of studying is
+                knowing what it told you about yourself, and that used to end at
+                this screen. */}
+            {scheduled?.length > 0 && (
+              <div className="mt-3 rounded-xl bg-sunken px-3 py-2.5 text-left">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-subink/80">
+                  Where these stand now
+                </p>
+                <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[12.5px] text-ink/90">
+                  {MASTERY_ORDER.filter((key) => standing[key] > 0).map((key) => (
+                    <span key={key} className="flex items-center gap-1.5">
+                      <span className={`h-2 w-2 rounded-full ${MASTERY[key].bar}`} />
+                      <span className="font-medium tabular-nums">{standing[key]}</span>
+                      <span className="text-subink">{MASTERY[key].label.toLowerCase()}</span>
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[11.5px] leading-snug text-subink">
+                  Every block on the canvas is marked with this.
+                </p>
               </div>
             )}
 

@@ -31,6 +31,11 @@ function asMap(rows) {
       dueAt: row.dueAt,
       reviewedAt: row.reviewedAt,
       lastGrade: row.lastGrade,
+      // The canvas shows each block's mastery with the score behind it — "Weak"
+      // on its own invites an argument, "1 of 3 points" does not — so the last
+      // score has to come back with the schedule, not only in the response to
+      // the session that produced it.
+      lastScore: row.lastScore,
     };
   }
   return map;

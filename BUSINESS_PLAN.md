@@ -28,13 +28,14 @@ Lacuna is one canvas that does all three.
 - **Write first.** Type a topic, get a blank block, and write what you already know. This order is deliberate — the writing is the learning.
 - **Then find the gaps.** *Find my gaps* reads what you actually wrote and reports three kinds of hole — **incorrect** (a claim that looks factually wrong), **missing** (a concept that isn't there at all), and **incomplete** (mentioned but not explained). For each one you choose: *Test me*, *Hint*, or *Fill gap*. It stops one step short of writing your notes, on purpose. *Make a graph* generates a three-level map of a topic at one of four depths when you're starting cold.
 - **Study the same artifact.** Every block with notes is a card. Notes are split into points, and each card is graded **per point** rather than pass/fail — nobody recalls a paragraph verbatim, and being marked wrong for failing to is not a useful signal. The session summary lists the *specific* points that got away.
+- **Then the canvas changes.** Each block is marked **Untested / Weak / Learning / Mastered** from its own review history, so coming back from a session you can see where your knowledge is thin without reading a word. Clicking a count studies exactly those blocks. The map, the deck and the record of what you know are one object.
 
 The name is the thesis. A *lacuna* is a missing passage in a manuscript; the logo is
 the editorial notation for one. The product is about the gap, not the notes.
 
 ### What is genuinely different
 
-- **The map and the deck are the same object.** No re-typing. Building the map *is* making the flashcards.
+- **The map and the deck are the same object.** No re-typing. Building the map *is* making the flashcards — and the map is where the results come back, coloured per block.
 - **The AI's job is to find what's missing from your writing** — not to write it for you. A tool that writes your notes leaves you with nothing learned.
 - **Grading is per point**, which produces the data nobody else has: not "you scored 6/10" but "you don't know these four facts."
 - **Bring your own AI.** The app talks to any OpenAI-compatible endpoint, including a model running locally on your own laptop for free. Already built and working.

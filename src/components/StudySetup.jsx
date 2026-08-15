@@ -46,6 +46,7 @@ export default function StudySetup({
   canvasTitle,
   totalCards,
   dueCount,
+  weakCount,
   flaggedCount,
   scope,
   mode,
@@ -99,6 +100,17 @@ export default function StudySetup({
                   : 'Cards you have never seen, plus the ones the schedule says are ready.'
               }
             />
+            {weakCount > 0 && (
+              <Option
+                selected={scope === 'weak'}
+                onSelect={() => onScope('weak')}
+                title="Weak only"
+                badge={weakCount}
+                // The same set the canvas marks in red, reachable from the side
+                // you are already on.
+                detail="The blocks where less than 60% came back last time."
+              />
+            )}
             <Option
               selected={scope === 'all'}
               onSelect={() => onScope('all')}

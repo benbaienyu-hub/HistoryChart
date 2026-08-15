@@ -3,7 +3,8 @@
 A knowledge canvas. Search a topic to drop a block on an infinite canvas, write
 notes on it, branch into sub-topics, connect blocks with labelled relationships —
 then let the AI find the gaps in what you wrote, and choose for each one whether
-to be tested on it, hinted at it, or handed it.
+to be tested on it, hinted at it, or handed it. Study the same blocks as
+flashcards, and every one of them carries what studying established about it.
 
 A *lacuna* is a gap — specifically a missing passage in a manuscript. Finding the
 ones in your own notes is the point of the app.
@@ -644,10 +645,56 @@ Click **Study** and you choose two things before seeing a card, because both
 genuinely change the session:
 
 **What** — *Due now* (what the schedule says is ready, plus anything never seen),
-*Everything*, or *Flagged only*.
+*Weak only*, *Everything*, or *Flagged only*.
 
 **How** — *Self-check* (recall it in your head, reveal, tick what you had), or
 *Type the answer*.
+
+### Mastery, on the canvas
+
+The canvas and the flashcards used to be two features that happened to share
+data. You studied, learned something real about yourself, and then went back to
+a canvas that looked exactly as it had before — every block the same shade of
+"some notes". The evidence was already there in the review rows. It just never
+made it back onto the thing you actually look at.
+
+So every block that has notes now carries its learning status: a coloured bar
+down its left edge, and a pill under the notes with the last score beside it.
+
+| | | What it means |
+| --- | --- | --- |
+| ⬜ | **Untested** | There are notes here and you have never been asked about them |
+| 🟥 | **Weak** | Less than 60% of it came back last time |
+| 🟧 | **Learning** | You recalled it, but not enough times running to call it known |
+| 🟩 | **Mastered** | You recalled it well, three sessions running |
+
+A block with **no notes** shows nothing at all rather than "Untested". It isn't a
+card, so it cannot be tested, and the useful distinction is between *go and study
+this* and *go and write this* — one badge for both would lose it.
+
+**Mastery is evidence, not a clock.** It never changes because time passed. The
+due count already answers "what should I study now"; this answers "what do I
+actually know", and blending them makes both harder to read — a card can be
+perfectly well known *and* due, or badly known and not due for a week. It also
+means the colour on a block never shifts just because you left the tab open
+overnight.
+
+**A mastered card that you then fail drops straight back to Weak** and has to
+climb again. That is the honest reading: the point is to tell you where you
+stand now, not the best you have ever done.
+
+**The counts at the top left are buttons.** Seeing that four blocks are weak and
+then having to go and reconstruct which four in the study setup is exactly the
+seam this feature exists to close — so clicking a count starts a session on
+precisely those blocks, skipping the setup screen, since you have just answered
+the question it asks. The same set is available as *Weak only* from the ordinary
+Study button, for the trip in the other direction. The strip appears only once
+something has been studied; before that it would be a row of zeroes explaining a
+feature you have not used.
+
+The end-of-session screen reports where the cards you just studied now stand, so
+the handover back to the canvas is explicit rather than something you have to
+notice.
 
 ### Spaced repetition
 
@@ -767,6 +814,7 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/layout.js` | Tidy-tree layout over the `parentId` forest |
 | `src/lib/deck.js` | Flashcard selection, point splitting, and per-point grading |
 | `src/lib/review.js` | The scheduler — intervals, ease, what's due |
+| `src/lib/mastery.js` | Untested / Weak / Learning / Mastered, derived from review rows |
 | `src/lib/recall.js` | Matching typed free recall against a card's points |
 | `src/components/StudySetup.jsx` | The what-and-how screen before a session |
 | `server/reviewRoutes.js` | Per-user review state; the server owns the scheduling |

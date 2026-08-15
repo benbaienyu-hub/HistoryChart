@@ -29,6 +29,13 @@
   --color-danger: #dc2626;
   --color-danger-bg: rgba(220, 38, 38, 0.08);
 
+  /* The one thing in the palette that means "this went well" — mastered blocks.
+     Green rather than the accent blue, which is already the colour of every
+     button and would read as "selected". */
+  --color-good: #15803d;
+  --color-good-bg: rgba(22, 163, 74, 0.1);
+  --color-good-line: rgba(22, 163, 74, 0.3);
+
   /* React Flow chrome */
   --color-dot: rgba(0, 0, 0, 0.12);
   --color-edge: rgba(0, 0, 0, 0.15);
@@ -59,6 +66,10 @@
     --color-danger: #ff6b6b;
     --color-danger-bg: rgba(255, 107, 107, 0.12);
 
+    --color-good: #4ade80;
+    --color-good-bg: rgba(74, 222, 128, 0.13);
+    --color-good-line: rgba(74, 222, 128, 0.28);
+
     --color-dot: rgba(255, 255, 255, 0.13);
     --color-edge: rgba(255, 255, 255, 0.2);
   }
@@ -85,6 +96,10 @@
 
   --color-danger: #ff6b6b;
   --color-danger-bg: rgba(255, 107, 107, 0.12);
+
+  --color-good: #4ade80;
+  --color-good-bg: rgba(74, 222, 128, 0.13);
+  --color-good-line: rgba(74, 222, 128, 0.28);
 
   --color-dot: rgba(255, 255, 255, 0.13);
   --color-edge: rgba(255, 255, 255, 0.2);

@@ -21,6 +21,14 @@ import {
 } from '../lib/api';
 import { serializeCanvas as serialize } from '../lib/canvasShape';
 import { countDue } from '../lib/review';
+import {
+  MASTERY,
+  MASTERY_ORDER,
+  countLevels,
+  idsAtLevel,
+  masteryByBlock,
+  withMastery,
+} from '../lib/mastery';
 import { categoryColor } from '../lib/categories';
 import { appendPoints } from '../lib/gaps';
 import { autoLayout } from '../lib/layout';
@@ -182,13 +190,22 @@ function CanvasEditor({ user, record, onExit }) {
   // What React Flow actually renders: collapsed subtrees marked hidden, plus
   // per-node child/hidden counts for the collapse control.
   const visible = useMemo(() => withVisibility(nodes, edges), [nodes, edges]);
+  // What studying has established, painted back onto the blocks. This is the
+  // whole point of keeping review state in the canvas rather than only in study
+  // mode: you come back from a session and the canvas has changed.
+  const rendered = useMemo(() => withMastery(visible.nodes, reviews), [visible.nodes, reviews]);
+  const masteryLevels = useMemo(() => masteryByBlock(nodes, reviews), [nodes, reviews]);
+  const mastery = useMemo(() => countLevels(masteryLevels), [masteryLevels]);
+  const studiedCount = mastery.weak + mastery.learning + mastery.mastered;
   // Cards with notes that the schedule says are ready, plus any never studied.
   const dueNow = useMemo(
     () => countDue(nodes.filter((n) => n.data.notes?.trim()), reviews),
     [nodes, reviews]
   );
 
-  const expandedNode = expandedId ? (nodes.find((n) => n.id === expandedId) ?? null) : null;
+  // From the rendered list rather than the raw one, so the expanded view carries
+  // the mastery status too.
+  const expandedNode = expandedId ? (rendered.find((n) => n.id === expandedId) ?? null) : null;
 
   // Always-current view of the graph, for closures that would otherwise go stale.
   const liveRef = useRef({ nodes, edges });
@@ -1158,6 +1175,40 @@ function CanvasEditor({ user, record, onExit }) {
         </button>
       </div>
 
+      {/* The bridge between the two halves of the app. It appears only once
+          something has actually been studied — before that it would be a row of
+          zeroes explaining a feature you have not used. Each count is a button:
+          seeing that four blocks are weak and then having to go and reconstruct
+          which four in the study setup is the exact seam this is meant to close. */}
+      {studiedCount > 0 && (
+        <div
+          className={`absolute left-4 z-10 flex items-center gap-0.5 rounded-full border border-line bg-surface px-1.5 py-1 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.18)] backdrop-blur-xl ${
+            saveError || !canEdit ? 'top-[104px]' : 'top-[69px]'
+          }`}
+        >
+          {MASTERY_ORDER.filter((key) => mastery[key] > 0).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() =>
+                setStudying({
+                  label: MASTERY[key].label.toLowerCase(),
+                  ids: idsAtLevel(nodes, reviews, key),
+                })
+              }
+              title={`Study the ${mastery[key]} ${MASTERY[key].label.toLowerCase()} ${
+                mastery[key] === 1 ? 'block' : 'blocks'
+              } — ${MASTERY[key].detail}`}
+              className="flex items-center gap-1.5 rounded-full px-2 py-1 text-[12px] transition-colors hover:bg-hover"
+            >
+              <span className={`h-2 w-2 rounded-full ${MASTERY[key].bar}`} />
+              <span className="font-medium tabular-nums text-ink">{mastery[key]}</span>
+              <span className="text-subink">{MASTERY[key].label.toLowerCase()}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {nodes.length === 0 && (
         <div className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center px-6">
           <p className="text-[15px] text-subink">Search a topic above to start your canvas</p>
@@ -1180,7 +1231,7 @@ function CanvasEditor({ user, record, onExit }) {
       )}
 
       <ReactFlow
-        nodes={visible.nodes}
+        nodes={rendered}
         edges={visible.edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -1279,6 +1330,9 @@ function CanvasEditor({ user, record, onExit }) {
           nodes={nodes}
           canvasTitle={title}
           reviews={reviews}
+          // Set only when a mastery count was clicked: the question "what am I
+          // studying" is already answered, so that session skips the setup screen.
+          focus={studying === true ? null : studying}
           onExit={() => setStudying(false)}
           onFinish={handleStudyFinish}
         />

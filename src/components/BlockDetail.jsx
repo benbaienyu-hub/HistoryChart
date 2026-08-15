@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { CATEGORIES, categoryColor, categoryLabel } from '../lib/categories';
+import { MASTERY } from '../lib/mastery';
 import { hasImageFiles, imagesFromClipboard, imagesFromDataTransfer, sortImageFiles } from '../lib/imageFiles';
 import { AddImageButton } from './BlockImages';
 
@@ -30,6 +31,9 @@ export default function BlockDetail({
     unsure,
     aiFilled,
     aiCorrection,
+    mastery,
+    masteryTitle,
+    masteryScore,
     images = [],
     uploadingImages = 0,
   } = node.data;
@@ -118,6 +122,19 @@ export default function BlockDetail({
               >
                 {unsure ? '? Flagged as unsure' : 'Mark as unsure'}
               </button>
+
+              {/* Read-only, unlike everything else in this row — it is the one
+                  thing here you cannot set, only earn. */}
+              {mastery && (
+                <span
+                  title={masteryTitle}
+                  className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[12px] font-medium ${MASTERY[mastery].pill}`}
+                >
+                  <span className={`h-2 w-2 rounded-full ${MASTERY[mastery].bar}`} />
+                  {MASTERY[mastery].label}
+                  {masteryScore && <span className="tabular-nums opacity-70">{masteryScore}</span>}
+                </span>
+              )}
 
               {onAddImages && (
                 <AddImageButton

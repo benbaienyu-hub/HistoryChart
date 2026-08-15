@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from 'react';
 import { Handle, Position } from 'reactflow';
 import { AnimatePresence, motion } from 'framer-motion';
 import { categoryColor, categoryLabel } from '../lib/categories';
+import { MASTERY } from '../lib/mastery';
 import { hasImageFiles, imagesFromClipboard, imagesFromDataTransfer } from '../lib/imageFiles';
 import { ImageStrip } from './BlockImages';
 import BlockMenu from './BlockMenu';
@@ -36,6 +37,11 @@ function KnowledgeBlock({ data, id }) {
     childCount = 0,
     hiddenCount = 0,
     isAddingChild,
+    // What studying has established about this block. Null for a block with no
+    // notes, which is not a card and so has no learning status to have.
+    mastery,
+    masteryTitle,
+    masteryScore,
     images = [],
     uploadingImages = 0,
     onAddImages,
@@ -133,6 +139,16 @@ function KnowledgeBlock({ data, id }) {
       }}
       onDrop={handleDrop}
     >
+      {/* A colour down the edge as well as the pill below. The pill says which
+          state this is; the bar is what you can still pick out with six blocks
+          on screen and no intention of reading any of them. */}
+      {mastery && (
+        <span
+          aria-hidden="true"
+          className={`pointer-events-none absolute left-0 top-5 bottom-5 w-[3px] rounded-r-full ${MASTERY[mastery].bar}`}
+        />
+      )}
+
       {!isRoot && <Handle type="target" position={Position.Top} style={anchorStyle} />}
 
       <Handle
@@ -285,6 +301,23 @@ function KnowledgeBlock({ data, id }) {
         <p className="mt-1 text-[10px] font-medium uppercase tracking-wide text-accent">
           ✨ AI-filled — edit anytime
         </p>
+      )}
+
+      {/* Directly under the notes, because the notes are the thing that was
+          graded. The score rides alongside: "Weak" on its own invites an
+          argument with the app, "2/5" does not. */}
+      {mastery && (
+        <div className="mt-1.5 flex items-center gap-1.5" title={masteryTitle}>
+          <span
+            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide ${MASTERY[mastery].pill}`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${MASTERY[mastery].bar}`} />
+            {MASTERY[mastery].label}
+          </span>
+          {masteryScore && (
+            <span className="text-[10.5px] tabular-nums text-subink/70">{masteryScore}</span>
+          )}
+        </div>
       )}
 
       {aiCorrection && (

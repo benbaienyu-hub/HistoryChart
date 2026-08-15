@@ -611,6 +611,26 @@ describe('review schedules', () => {
     expect(json.reviews.b1.reps).toBe(1);
   });
 
+  it('sends the last score back with the schedule, not only with the session', async () => {
+    // The canvas marks every block with its mastery and the score behind it, and
+    // it reads that from this route on load — so a field that only came back in
+    // the response to the session that produced it left every block scoreless
+    // after a refresh.
+    const ben = await signedUp('ben@example.com');
+    const id = await canvasWithCard(ben);
+    await ben.call('POST', `/api/canvases/${id}/reviews`, {
+      grades: [{ blockId: 'b1', recalled: 1, total: 2 }],
+    });
+
+    const later = (await ben.call('GET', `/api/canvases/${id}/reviews`)).json.reviews;
+    expect(later.b1.lastScore).toEqual({ recalled: 1, total: 2 });
+    expect(later.b1.lastGrade).toBe('hard');
+    expect((await ben.call('GET', '/api/reviews')).json.reviews[id].b1.lastScore).toEqual({
+      recalled: 1,
+      total: 2,
+    });
+  });
+
   it('brings a missed card straight back', async () => {
     const ben = await signedUp('ben@example.com');
     const id = await canvasWithCard(ben);
