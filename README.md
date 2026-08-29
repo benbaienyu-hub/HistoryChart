@@ -644,6 +644,64 @@ import { handleKnowledgeRequest } from './server/knowledgeRoutes.js'
 app.post('/api/knowledge', handleKnowledgeRequest)
 ```
 
+## The home screen
+
+It used to answer only *"what do I have"* — a grid of cards — which left the
+question you actually arrive with unanswered. Everything needed for *"what should
+I do now"* was already on the page; it was just never added up. All of it comes
+from data the library already loads, so none of it costs an extra request or a
+model call.
+
+**A summary strip above the grid.** Pooled coverage and mastery across every
+canvas, one recommended action, and the standing counts underneath:
+
+```
+ACROSS 3 CANVASES                        67% coverage · 25% mastery
+
+Study 4 due cards                                          [ Start 4 ]
+Across 2 canvases, mixed into one session.
+─────────────────────────────────────────────────────────────────────
+4 cards due · 3 gaps found · 2 canvases never scanned
+```
+
+The recommendation is **singular on purpose**. A home screen offering five
+equally weighted things to do is one that has not decided, and deciding is the
+part you came for. Its order is the app's argument in priority form: recall what
+is slipping, then find what you don't know is missing, then shore up known
+weakness, then work through gaps already found. When there is genuinely nothing,
+it says so rather than manufacturing a chore.
+
+The two percentages are **pooled from the underlying counts, not averaged across
+canvases** — averaging would let a two-block canvas you abandoned drag down a
+hundred blocks you know cold.
+
+**A weakest-blocks list below the grid.** Your worst recall across every canvas
+at once — the canvas marks its own weak blocks, but one canvas at a time, so a
+fact you keep failing in Macroeconomics is invisible while you're looking at Cold
+War. Only blocks actually tested: one nobody has asked about is not *known* to be
+weak, and listing it on suspicion would bury the ones you demonstrably got wrong.
+Clicking a row opens that canvas **centred on that block**, since a list that only
+got you to the right canvas would leave you doing the finding.
+
+### Studying across canvases
+
+When due cards are spread over several canvases, the strip offers one mixed
+session instead of one session per canvas — revision doesn't respect those
+boundaries. Each card shows which canvas it came from, because "1876" means
+different things in a history deck and a chemistry one.
+
+Study mode itself is unchanged. Rather than teach the most intricate component in
+the app about several canvases, the canvases are **merged into something shaped
+exactly like one canvas**, with every block id namespaced by the canvas it came
+from (`canvasId::blockId`). Grades are split back apart on the way out and filed
+against the right canvas, one request each.
+
+The namespacing is not decoration. Block ids are UUIDs when a block is made by
+hand, but **two canvases built from the same template carry the same ids** — and a
+collision would silently merge two different blocks into one card and file the
+grade against whichever canvas answered last. There is a test for exactly that
+pair.
+
 ## Finding a canvas again
 
 The library header has a search field, and it searches **content, not just
@@ -929,6 +987,7 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/review.js` | The scheduler — intervals, ease, what's due |
 | `src/lib/mastery.js` | Untested / Weak / Learning / Mastered, derived from review rows |
 | `src/lib/progress.js` | Coverage and mastery percentages, and whether a stored scan is stale |
+| `src/lib/library.js` | The library totals, what to do next, weakest blocks, and merging canvases for one session |
 | `src/lib/recall.js` | Matching typed free recall against a card's points |
 | `src/components/StudySetup.jsx` | The what-and-how screen before a session |
 | `server/reviewRoutes.js` | Per-user review state; the server owns the scheduling |

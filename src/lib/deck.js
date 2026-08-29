@@ -91,6 +91,9 @@ export function buildDeck(nodes, { flaggedOnly = false, seed = 1, restrictTo = n
     date: n.data.date,
     category: n.data.category,
     unsure: n.data.unsure,
+    // Which canvas this came from, set only when several have been merged into
+    // one session. Null in an ordinary session, where the header already says it.
+    source: n.data.source ?? null,
     // Shown with the answer, not the prompt: a diagram on the front would give
     // away what you are trying to recall.
     images: n.data.images ?? [],

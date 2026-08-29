@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { canvasesOwnedBy as localCanvases, clearLocalCanvases } from '../lib/canvasStore';
-import { createCanvas, deleteCanvas, fetchAllReviews, fetchCanvases, saveCanvas } from '../lib/api';
+import {
+  createCanvas,
+  deleteCanvas,
+  fetchAllReviews,
+  fetchCanvases,
+  saveCanvas,
+  submitReviews,
+} from '../lib/api';
 import { categoryColor } from '../lib/categories';
 import {
   highlightSegments,
@@ -17,9 +24,18 @@ import {
   describeMasteryScore,
   formatPct,
 } from '../lib/progress';
-import { describeLibrary, librarySummary, nextAction, weakestBlocks } from '../lib/library';
+import {
+  describeLibrary,
+  groupGradesByCanvas,
+  librarySummary,
+  mergeForStudy,
+  nextAction,
+  studyCardId,
+  weakestBlocks,
+} from '../lib/library';
 import { countMastery } from '../lib/mastery';
 import Logo from './Logo';
+import StudyMode from './StudyMode';
 import ShareDialog from './ShareDialog';
 import AccountSettings from './AccountSettings';
 import ThemeToggle from './ThemeToggle';
@@ -250,7 +266,7 @@ function Metric({ title, value, label, tone, dim = false, first = false }) {
 // One recommendation, not a menu. A home screen offering five equally-weighted
 // things to do is one that has not decided, and deciding is the part you came
 // here for.
-function NextUp({ totals, action, onOpen }) {
+function NextUp({ totals, action, onOpen, onStudyAll }) {
   const line = describeLibrary(totals);
 
   return (
@@ -279,7 +295,20 @@ function NextUp({ totals, action, onOpen }) {
           <p className="mt-0.5 text-[12.5px] leading-snug text-subink">{action.detail}</p>
         </div>
 
-        {action.canvasId ? (
+        {action.kind === 'study-all' ? (
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={onStudyAll}
+            className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)]"
+          >
+            Start
+            <span className="ml-1.5 rounded-full bg-white/20 px-1.5 text-[11px] tabular-nums">
+              {action.count}
+            </span>
+          </motion.button>
+        ) : action.canvasId ? (
           <motion.button
             type="button"
             whileHover={{ scale: 1.02 }}
@@ -541,6 +570,8 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
   const [strays, setStrays] = useState(() => localCanvases(user.email));
 
   const [reviews, setReviews] = useState({});
+  // A study session spanning the whole library rather than one canvas.
+  const [studyingAll, setStudyingAll] = useState(false);
 
   const refresh = useCallback(
     () =>
@@ -583,6 +614,37 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // A mixed session grades cards from several canvases, and each grade has to be
+  // filed against the canvas its card actually came from. One request per canvas,
+  // and one canvas failing does not lose the others' results.
+  //
+  // The states that come back are re-namespaced on the way out, because the
+  // summary screen matches them against the cards it just showed — which carry
+  // merged ids.
+  const finishStudyAll = useCallback(async (grades) => {
+    const byCanvas = groupGradesByCanvas(grades);
+    const updated = [];
+
+    await Promise.all(
+      [...byCanvas.entries()].map(async ([canvasId, list]) => {
+        try {
+          const result = await submitReviews(
+            canvasId,
+            list.map((g) => ({ blockId: g.id, recalled: g.recalled, total: g.total }))
+          );
+          for (const state of result.updated ?? []) {
+            updated.push({ ...state, blockId: studyCardId(canvasId, state.blockId) });
+          }
+        } catch {
+          // Nothing to do here but keep the other canvases' results. The session
+          // summary will simply be missing this canvas's schedule.
+        }
+      })
+    );
+
+    return updated;
+  }, []);
 
   const owned = library.owned;
   // Every owned canvas, measured once, for the summary above the grid. The
@@ -717,6 +779,36 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
     readOnly: false,
   };
 
+  // Every owned canvas merged into one canvas-shaped deck. Built only while a
+  // mixed session is open — there is no reason to do it on every render of a
+  // screen that is usually just a grid of cards.
+  if (studyingAll) {
+    const merged = mergeForStudy(
+      owned.map((canvas) => ({
+        id: canvas.id,
+        title: canvas.title,
+        nodes: canvas.nodes ?? [],
+        reviews: reviews[canvas.id] ?? {},
+      }))
+    );
+
+    return (
+      <StudyMode
+        nodes={merged.nodes}
+        reviews={merged.reviews}
+        canvasTitle="Everything"
+        mixed
+        onFinish={finishStudyAll}
+        onExit={() => {
+          setStudyingAll(false);
+          // The library's due counts and mastery are now out of date by exactly
+          // the session that just happened.
+          refresh();
+        }}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-canvas">
       <header className="sticky top-0 z-20 flex items-center gap-4 border-b border-line bg-surface px-6 py-3 backdrop-blur-xl">
@@ -840,7 +932,12 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
           {/* Only on your own canvases, and not while searching: the totals are
               about the library, and a filtered view is about the filter. */}
           {tab === 'mine' && !searching && owned.length > 0 && (
-            <NextUp totals={totals} action={action} onOpen={onOpenCanvas} />
+            <NextUp
+              totals={totals}
+              action={action}
+              onOpen={onOpenCanvas}
+              onStudyAll={() => setStudyingAll(true)}
+            />
           )}
 
           {loadError && (

@@ -85,6 +85,22 @@ export function nextAction(rows = []) {
 
   const due = most('due');
   if (due && due.due > 0) {
+    // Whether the due cards are spread across the library or sitting in one
+    // canvas changes what to offer. One canvas: go there, and see the map you
+    // are being tested on. Several: mixing them is the point — revision does not
+    // respect the boundaries, and a session per canvas is busywork.
+    const spread = list.filter((row) => (row.due ?? 0) > 0).length;
+    const total = list.reduce((sum, row) => sum + (row.due ?? 0), 0);
+
+    if (spread > 1) {
+      return {
+        kind: 'study-all',
+        label: `Study ${total} due cards`,
+        count: total,
+        detail: `Across ${spread} canvases, mixed into one session.`,
+      };
+    }
+
     return {
       kind: 'study',
       canvasId: due.id,
@@ -179,6 +195,70 @@ export function weakestBlocks(canvases = [], { limit = 6 } = {}) {
   return found
     .sort((a, b) => a.fraction - b.fraction || b.missed - a.missed || a.label.localeCompare(b.label))
     .slice(0, limit);
+}
+
+// Studying across canvases.
+//
+// Study mode is written against one canvas: a list of nodes and a map of review
+// rows keyed by block id. Rather than teach it about several — surgery on the
+// most intricate component in the app — the canvases are merged into something
+// shaped exactly like one canvas, with every block id namespaced by the canvas it
+// came from. Study mode needs no changes at all; it simply sees a bigger canvas.
+//
+// The namespacing is not decoration. Block ids are UUIDs when a block is made by
+// hand, but two canvases built from the same template carry the same ids, and a
+// collision would silently merge two different people's Yalta into one card and
+// file the grade against whichever canvas answered last.
+const SEPARATOR = '::';
+
+export function studyCardId(canvasId, blockId) {
+  return `${canvasId}${SEPARATOR}${blockId}`;
+}
+
+export function splitStudyId(id) {
+  const at = String(id ?? '').indexOf(SEPARATOR);
+  if (at === -1) return { canvasId: null, blockId: String(id ?? '') };
+  return {
+    canvasId: String(id).slice(0, at),
+    blockId: String(id).slice(at + SEPARATOR.length),
+  };
+}
+
+// One canvas-shaped thing, out of many.
+//
+// `source` rides along on each block so a card can say which canvas it came from
+// mid-session — "1876" means different things in a history deck and a chemistry
+// one, and a mixed session without that is a quiz with the context removed.
+export function mergeForStudy(canvases = []) {
+  const nodes = [];
+  const reviews = {};
+
+  for (const canvas of canvases ?? []) {
+    if (!canvas?.id) continue;
+    for (const node of canvas.nodes ?? []) {
+      if (!node?.id) continue;
+      const id = studyCardId(canvas.id, node.id);
+      nodes.push({ ...node, id, data: { ...node.data, source: canvas.title ?? '' } });
+
+      const row = canvas.reviews?.[node.id];
+      if (row) reviews[id] = row;
+    }
+  }
+
+  return { nodes, reviews };
+}
+
+// Grades come back keyed by the merged id, and have to be filed against the
+// canvas each card actually belongs to.
+export function groupGradesByCanvas(grades = []) {
+  const byCanvas = new Map();
+  for (const grade of grades ?? []) {
+    const { canvasId, blockId } = splitStudyId(grade?.id);
+    if (!canvasId) continue;
+    if (!byCanvas.has(canvasId)) byCanvas.set(canvasId, []);
+    byCanvas.get(canvasId).push({ ...grade, id: blockId });
+  }
+  return byCanvas;
 }
 
 // The library's headline, in words. Only the parts that are actually true — a

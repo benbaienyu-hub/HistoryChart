@@ -86,7 +86,16 @@ describe('buildDeck', () => {
       date: '1914',
       category: 'event',
       unsure: true,
+      // Which canvas the card came from. Null here and in every ordinary
+      // session — it is set only when several canvases have been merged into one
+      // deck, where the header can no longer say which canvas you are in.
+      source: null,
     });
+  });
+
+  it('carries the source through when one has been set', () => {
+    const nodes = [node('a', null, { notes: 'n', source: 'Cold War' })];
+    expect(buildDeck(nodes)[0].source).toBe('Cold War');
   });
 
   it('is stable for a seed, so a re-render does not reshuffle mid-session', () => {

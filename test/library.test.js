@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { describeLibrary, librarySummary, nextAction, weakestBlocks } from '../src/lib/library';
+import {
+  describeLibrary,
+  groupGradesByCanvas,
+  librarySummary,
+  mergeForStudy,
+  nextAction,
+  splitStudyId,
+  studyCardId,
+  weakestBlocks,
+} from '../src/lib/library';
 
 // A measured canvas, as progress.js would hand it over.
 const row = (over = {}) => ({
@@ -63,15 +72,28 @@ describe('librarySummary', () => {
 });
 
 describe('nextAction', () => {
-  it('sends you to study when anything is due, and names the fullest deck', () => {
+  it('sends you into one canvas when that is where all the due cards are', () => {
     // Recall first: it is the thing that decays, and the only one of these with a
-    // deadline attached.
+    // deadline attached. One canvas means going there, where you can also see the
+    // map you are being tested on.
     const action = nextAction([
-      row({ id: 'a', title: 'Cold War', due: 2 }),
+      row({ id: 'a', title: 'Cold War', due: 0 }),
       row({ id: 'b', title: 'Cell Biology', due: 9 }),
     ]);
     expect(action).toMatchObject({ kind: 'study', canvasId: 'b', count: 9 });
     expect(action.label).toContain('Cell Biology');
+  });
+
+  it('offers one mixed session when the due cards are spread about', () => {
+    // Revision does not respect canvas boundaries, and a session per canvas is
+    // busywork.
+    const action = nextAction([
+      row({ id: 'a', title: 'Cold War', due: 2 }),
+      row({ id: 'b', title: 'Cell Biology', due: 9 }),
+    ]);
+    expect(action).toMatchObject({ kind: 'study-all', count: 11 });
+    expect(action.canvasId).toBeUndefined();
+    expect(action.detail).toContain('2 canvases');
   });
 
   it('offers a scan next, on the canvas you were last working on', () => {
@@ -202,6 +224,101 @@ describe('weakestBlocks', () => {
     expect(weakestBlocks()).toEqual([]);
     expect(weakestBlocks([{ id: 'c', nodes: null, reviews: null }])).toEqual([]);
     expect(weakestBlocks([canvas('c', 'X', [null, {}], {})])).toEqual([]);
+  });
+});
+
+describe('merging canvases for one study session', () => {
+  const block = (id, label = id) => ({ id, data: { label, notes: '- something' } });
+  const src = (id, title, nodes, reviews = {}) => ({ id, title, nodes, reviews });
+
+  it('produces something shaped exactly like a single canvas', () => {
+    const { nodes, reviews } = mergeForStudy([
+      src('c1', 'Cold War', [block('a')], { a: { lastScore: { recalled: 1, total: 2 } } }),
+      src('c2', 'Macro', [block('b')]),
+    ]);
+    expect(nodes).toHaveLength(2);
+    expect(reviews[studyCardId('c1', 'a')]).toEqual({ lastScore: { recalled: 1, total: 2 } });
+  });
+
+  it('namespaces block ids, so two canvases from one template cannot collide', () => {
+    // Blocks made by hand get UUIDs, but canvases built from the same template
+    // carry the same ids. A collision would merge two different Yaltas into one
+    // card and file the grade against whichever canvas answered last.
+    const { nodes, reviews } = mergeForStudy([
+      src('c1', 'One', [block('b1', 'Yalta')], { b1: { lastScore: { recalled: 0, total: 2 } } }),
+      src('c2', 'Two', [block('b1', 'Potsdam')], { b1: { lastScore: { recalled: 2, total: 2 } } }),
+    ]);
+    expect(new Set(nodes.map((n) => n.id)).size).toBe(2);
+    expect(Object.keys(reviews)).toHaveLength(2);
+    expect(nodes.map((n) => n.data.label)).toEqual(['Yalta', 'Potsdam']);
+  });
+
+  it('tells each block which canvas it came from', () => {
+    // "1876" means different things in a history deck and a chemistry one. A
+    // mixed session without the source is a quiz with the context removed.
+    const { nodes } = mergeForStudy([src('c1', 'Cold War', [block('a')])]);
+    expect(nodes[0].data.source).toBe('Cold War');
+  });
+
+  it('keeps the rest of a block untouched', () => {
+    const rich = { id: 'a', position: { x: 4, y: 5 }, data: { label: 'A', notes: '- x', unsure: true } };
+    const { nodes } = mergeForStudy([src('c1', 'Cold War', [rich])]);
+    expect(nodes[0]).toMatchObject({ position: { x: 4, y: 5 } });
+    expect(nodes[0].data).toMatchObject({ label: 'A', notes: '- x', unsure: true });
+  });
+
+  it('carries no review row for a block that has never been studied', () => {
+    const { reviews } = mergeForStudy([src('c1', 'Cold War', [block('a')])]);
+    expect(reviews).toEqual({});
+  });
+
+  it('survives junk', () => {
+    expect(mergeForStudy()).toEqual({ nodes: [], reviews: {} });
+    expect(mergeForStudy([null, { id: null }, { id: 'c', nodes: null }])).toEqual({
+      nodes: [],
+      reviews: {},
+    });
+  });
+});
+
+describe('splitStudyId and groupGradesByCanvas', () => {
+  it('round-trips an id', () => {
+    expect(splitStudyId(studyCardId('c1', 'block-9'))).toEqual({
+      canvasId: 'c1',
+      blockId: 'block-9',
+    });
+  });
+
+  it('survives a block id that itself contains the separator', () => {
+    // Only the first separator counts, so the canvas id is always recovered whole.
+    expect(splitStudyId(studyCardId('c1', 'odd::name'))).toEqual({
+      canvasId: 'c1',
+      blockId: 'odd::name',
+    });
+  });
+
+  it('reports no canvas for a plain id rather than inventing one', () => {
+    expect(splitStudyId('just-a-block')).toEqual({ canvasId: null, blockId: 'just-a-block' });
+  });
+
+  it('files each grade against the canvas its card came from', () => {
+    const grouped = groupGradesByCanvas([
+      { id: studyCardId('c1', 'a'), recalled: 1, total: 2 },
+      { id: studyCardId('c2', 'b'), recalled: 2, total: 2 },
+      { id: studyCardId('c1', 'c'), recalled: 0, total: 1 },
+    ]);
+    expect([...grouped.keys()]).toEqual(['c1', 'c2']);
+    expect(grouped.get('c1')).toEqual([
+      { id: 'a', recalled: 1, total: 2 },
+      { id: 'c', recalled: 0, total: 1 },
+    ]);
+    // And the block id is restored, since that is what the server knows.
+    expect(grouped.get('c2')[0].id).toBe('b');
+  });
+
+  it('drops a grade that names no canvas rather than guessing one', () => {
+    expect(groupGradesByCanvas([{ id: 'orphan', recalled: 1, total: 1 }]).size).toBe(0);
+    expect(groupGradesByCanvas().size).toBe(0);
   });
 });
 

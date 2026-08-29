@@ -15,6 +15,9 @@ export default function StudyMode({
   // already scoped, so it opens on the first card instead of on a setup screen
   // asking a question that has just been answered.
   focus = null,
+  // Several canvases merged into one deck, started from the library. Only the
+  // wording changes: there is no single canvas to go back to or to talk about.
+  mixed = false,
   onExit,
   onFinish,
 }) {
@@ -296,7 +299,9 @@ export default function StudyMode({
                   ))}
                 </div>
                 <p className="mt-1.5 text-[11.5px] leading-snug text-subink">
-                  Every block on the canvas is marked with this.
+                  {mixed
+                    ? 'Every block on every canvas is marked with this.'
+                    : 'Every block on the canvas is marked with this.'}
                 </p>
               </div>
             )}
@@ -365,7 +370,7 @@ export default function StudyMode({
                 onClick={onExit}
                 className="py-1 text-[13px] text-subink hover:text-ink"
               >
-                Back to canvas
+                {mixed ? 'Back to library' : 'Back to canvas'}
               </button>
             </div>
           </motion.div>
@@ -396,7 +401,7 @@ export default function StudyMode({
             onClick={onExit}
             className="mt-5 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white"
           >
-            Back to canvas
+            {mixed ? 'Back to library' : 'Back to canvas'}
           </button>
         </div>
       </div>
@@ -444,6 +449,14 @@ export default function StudyMode({
                 {card.unsure && (
                   <span className="rounded-full bg-warn-bg px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warn">
                     flagged
+                  </span>
+                )}
+                {/* Only in a mixed session. "1876" means different things in a
+                    history deck and a chemistry one, and the header can no longer
+                    say which you are in. */}
+                {card.source && (
+                  <span className="min-w-0 truncate rounded-full bg-sunken px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-subink">
+                    {card.source}
                   </span>
                 )}
                 {card.date && (
