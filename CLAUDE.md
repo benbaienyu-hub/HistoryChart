@@ -203,6 +203,12 @@ universal truths.
   in `src/index.css`. They are what makes dark mode work. Adding a colour means
   adding a token in all three places (`:root`, the `prefers-color-scheme` block,
   and `[data-theme='dark']`).
+- **A `src/lib` module the server imports must use explicit `.js` extensions**,
+  including in its own relative imports. Vite resolves `from './deck'` and plain
+  Node — which runs the standalone server and the Vercel function — does not, so
+  leaving the extension off breaks production only. `test/moduleResolution.test.js`
+  starts a real Node process and imports the entry points to catch exactly this;
+  the rest of the suite runs through Vite's resolver and cannot.
 - **`src/lib` modules have no React import.** If you find yourself wanting one,
   the logic probably belongs in the component and the pure part belongs in lib.
 - **Blocks are created in exactly one place.** `makeNode` inside `Canvas.jsx` is
