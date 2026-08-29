@@ -149,7 +149,9 @@ The collections are defined in `server/stores/document.js`: `users`, `sessions`,
   `SuggestedBlock.jsx` renders the dashed ghost. Ghosts never enter node state,
   so they cannot be saved, tidied, or undone.
 - **Study mode.** `deck.js` builds the cards and grades per point, `recall.js`
-  matches typed free recall, `review.js` is the scheduler. State is per user per
+  matches typed free recall, `review.js` is the scheduler, and `session.js` turns
+  the stored gap questions into cards and re-asks a card you barely had, later in
+  the same session. State is per user per
   block, stored server-side so a client cannot inflate its own intervals.
 - **Mastery.** `src/lib/mastery.js` derives Untested / Weak / Learning / Mastered
   from the review rows and paints it back onto each block.

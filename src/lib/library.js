@@ -209,6 +209,8 @@ export function weakestBlocks(canvases = [], { limit = 6 } = {}) {
 // hand, but two canvases built from the same template carry the same ids, and a
 // collision would silently merge two different people's Yalta into one card and
 // file the grade against whichever canvas answered last.
+import { gapCardId } from './session.js';
+
 const SEPARATOR = '::';
 
 export function studyCardId(canvasId, blockId) {
@@ -232,9 +234,25 @@ export function splitStudyId(id) {
 export function mergeForStudy(canvases = []) {
   const nodes = [];
   const reviews = {};
+  const gaps = [];
 
   for (const canvas of canvases ?? []) {
     if (!canvas?.id) continue;
+
+    // The scan's questions come along too, with ids namespaced the same way. A
+    // gap card's id has to start with its canvas or the grade lands on the wrong
+    // one — and two canvases can easily hold a gap with the same name, since gap
+    // ids are built from the title.
+    for (const gap of canvas.gaps ?? []) {
+      if (!gap?.id) continue;
+      gaps.push({
+        ...gap,
+        studyId: studyCardId(canvas.id, gapCardId(gap.id)),
+        source: canvas.title ?? '',
+      });
+      const row = canvas.reviews?.[gapCardId(gap.id)];
+      if (row) reviews[studyCardId(canvas.id, gapCardId(gap.id))] = row;
+    }
     for (const node of canvas.nodes ?? []) {
       if (!node?.id) continue;
       const id = studyCardId(canvas.id, node.id);
@@ -245,7 +263,7 @@ export function mergeForStudy(canvases = []) {
     }
   }
 
-  return { nodes, reviews };
+  return { nodes, reviews, gaps };
 }
 
 // Grades come back keyed by the merged id, and have to be filed against the

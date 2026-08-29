@@ -125,6 +125,27 @@ describe('normalizeGaps', () => {
     expect(new Set(gaps.map((g) => g.id)).size).toBe(2);
   });
 
+  it('gives the same hole the same id next time it is found', () => {
+    // A gap's question is a study card, and a card needs an id that survives the
+    // next scan. Numbering by position meant re-finding the same hole minted a
+    // new card and threw away everything the schedule had learned.
+    const first = normalizeGaps([raw({ title: 'Something else' }), raw()], digest);
+    const second = normalizeGaps([raw()], digest);
+    expect(second[0].id).toBe(first.find((g) => g.title === raw().title).id);
+  });
+
+  it('tells two kinds of gap about the same thing apart', () => {
+    const gaps = normalizeGaps(
+      [raw({ title: 'Reparations' }), raw({ kind: 'incomplete', title: 'Reparations' })],
+      digest
+    );
+    expect(new Set(gaps.map((g) => g.id)).size).toBe(2);
+  });
+
+  it('still has an id when the title is all punctuation', () => {
+    expect(normalizeGaps([raw({ title: '???' })], digest)[0].id).toBe('missing-untitled');
+  });
+
   it('survives junk instead of a list', () => {
     expect(normalizeGaps(undefined, digest)).toEqual([]);
     expect(normalizeGaps('nonsense', digest)).toEqual([]);

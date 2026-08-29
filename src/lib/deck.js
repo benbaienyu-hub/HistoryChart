@@ -78,7 +78,10 @@ export function splitPoints(notes) {
 // A block becomes a card only once it has notes — the notes are the answer, so
 // an empty block would be an unanswerable prompt. Collapsed blocks still count:
 // folding a branch is a viewing choice, not a decision to stop studying it.
-export function buildDeck(nodes, { flaggedOnly = false, seed = 1, restrictTo = null } = {}) {
+export function buildDeck(
+  nodes,
+  { flaggedOnly = false, seed = 1, restrictTo = null, extra = [] } = {}
+) {
   const usable = nodes.filter(
     (n) => n.data.notes?.trim() && (!flaggedOnly || n.data.unsure)
   );
@@ -99,7 +102,11 @@ export function buildDeck(nodes, { flaggedOnly = false, seed = 1, restrictTo = n
     images: n.data.images ?? [],
   }));
 
-  const ordered = shuffle(cards, seed);
+  // Cards that did not come from a block — the questions a gap scan wrote. They
+  // are shuffled in with the rest rather than tacked on the end, so a session
+  // does not become "your notes, then a quiz", which would let you brace for the
+  // change of mode instead of being asked.
+  const ordered = shuffle([...cards, ...(extra ?? [])], seed);
   return restrictTo ? ordered.filter((c) => restrictTo.includes(c.id)) : ordered;
 }
 

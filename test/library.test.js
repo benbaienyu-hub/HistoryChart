@@ -273,11 +273,50 @@ describe('merging canvases for one study session', () => {
   });
 
   it('survives junk', () => {
-    expect(mergeForStudy()).toEqual({ nodes: [], reviews: {} });
+    expect(mergeForStudy()).toEqual({ nodes: [], reviews: {}, gaps: [] });
     expect(mergeForStudy([null, { id: null }, { id: 'c', nodes: null }])).toEqual({
       nodes: [],
       reviews: {},
+      gaps: [],
     });
+  });
+});
+
+describe('merging the gap questions too', () => {
+  const block = (id) => ({ id, data: { label: id, notes: '- something' } });
+  const gap = (id) => ({ id, kind: 'missing', question: 'Q?', answer: 'A.' });
+
+  it('namespaces a gap card by its canvas, so a grade lands on the right one', () => {
+    // Gap ids are built from the title, so two canvases can easily hold a gap
+    // with the same id. Without this, answering a biology question would file the
+    // result against a history canvas.
+    const { gaps } = mergeForStudy([
+      { id: 'c1', title: 'One', nodes: [block('a')], gaps: [gap('missing-x')] },
+      { id: 'c2', title: 'Two', nodes: [block('b')], gaps: [gap('missing-x')] },
+    ]);
+    expect(new Set(gaps.map((g) => g.studyId)).size).toBe(2);
+    expect(splitStudyId(gaps[0].studyId).canvasId).toBe('c1');
+    expect(splitStudyId(gaps[1].studyId).canvasId).toBe('c2');
+  });
+
+  it('carries the canvas name so a question can say where it came from', () => {
+    const { gaps } = mergeForStudy([
+      { id: 'c1', title: 'Cold War', nodes: [], gaps: [gap('missing-x')] },
+    ]);
+    expect(gaps[0].source).toBe('Cold War');
+  });
+
+  it('brings a question’s own schedule along', () => {
+    const { reviews } = mergeForStudy([
+      {
+        id: 'c1',
+        title: 'One',
+        nodes: [],
+        gaps: [gap('missing-x')],
+        reviews: { 'gap:missing-x': { lastScore: { recalled: 1, total: 1 } } },
+      },
+    ]);
+    expect(Object.keys(reviews)).toEqual([studyCardId('c1', 'gap:missing-x')]);
   });
 });
 

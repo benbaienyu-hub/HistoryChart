@@ -770,6 +770,44 @@ genuinely change the session:
 **How** — *Self-check* (recall it in your head, reveal, tick what you had), or
 *Type the answer*.
 
+### The deck asks real questions, and pays attention
+
+Every card used to be the same move: here is a block title, tell me everything,
+tick what you had, next. A bare label is a weak cue, nothing varied, and the deck
+never reacted to how you were doing. Two things changed that.
+
+**The gap scan's questions are cards.** "Find my gaps" already writes a real
+question and answer for every hole it finds, and since scans are stored those
+questions were sitting in your canvases doing nothing. They are now shuffled *in
+with* your own cards — not tacked on the end, which would let you brace for the
+change of mode instead of being asked. There is a checkbox on the setup screen to
+leave them out, because a session about only your own writing is a legitimate
+thing to want.
+
+It costs **no model call**: the questions were generated and paid for when the
+canvas was scanned.
+
+A question card is marked **From your gaps** and names the block it concerns. The
+marking is not decoration — the rest of the deck is your own writing, and quietly
+mixing in an answer somebody else wrote would blur the one distinction this app is
+built on. All three kinds are included, *missing* ones too: a question about
+something absent from your notes is exactly what the panel's "Test me" button
+asks, and there is no reason it should only be available there.
+
+Question cards are scheduled like anything else, under their own ids, and are
+deliberately **left out of coverage and mastery** — those numbers are about what
+you wrote, and a question is about what you did not.
+
+**A card you barely had comes back.** Get less than 60% of a card — the same
+threshold the canvas calls Weak — and it is put back into the session four cards
+later. Being asked twice with other cards in between is the difference between
+reading an answer and retrieving it. Once only: a card you keep failing would
+otherwise loop until you gave up or guessed, and the scheduler already has a plan
+for something you cannot recall at all — tomorrow. Only the **final attempt** is
+graded and submitted, so a re-asked card is one line in the score rather than two.
+
+The progress bar counts the queue, so a session that just got longer says so.
+
 ### Coverage and mastery are two numbers, not one
 
 A single progress bar averages away the only thing worth knowing. Someone can
@@ -984,6 +1022,7 @@ hardcode white or black and both themes stay in sync.
 | `src/components/BlockDetail.jsx` | The half-screen expanded view of one block |
 | `src/lib/layout.js` | Tidy-tree layout over the `parentId` forest |
 | `src/lib/deck.js` | Flashcard selection, point splitting, and per-point grading |
+| `src/lib/session.js` | Gap questions as cards, and re-asking a card you barely had |
 | `src/lib/review.js` | The scheduler — intervals, ease, what's due |
 | `src/lib/mastery.js` | Untested / Weak / Learning / Mastered, derived from review rows |
 | `src/lib/progress.js` | Coverage and mastery percentages, and whether a stored scan is stale |

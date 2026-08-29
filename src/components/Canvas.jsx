@@ -1610,6 +1610,7 @@ function CanvasEditor({ user, record, focusBlockId = null, onExit }) {
           nodes={nodes}
           canvasTitle={title}
           reviews={reviews}
+          gaps={gaps}
           // Set only when a mastery count was clicked: the question "what am I
           // studying" is already answered, so that session skips the setup screen.
           focus={studying === true ? null : studying}

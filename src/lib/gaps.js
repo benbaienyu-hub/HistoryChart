@@ -77,6 +77,17 @@ export function fillPoints(text) {
     .filter(Boolean);
 }
 
+// A gap's identity: its kind and what it is called, flattened so the same hole
+// found again next month is recognisably the same hole.
+export function gapId(kind, title) {
+  const slug = String(title ?? '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return `${kind}-${slug || 'untitled'}`;
+}
+
 // Turns whatever the model returned into gaps this app can render, dropping
 // anything unusable rather than showing a card with an empty title.
 //
@@ -88,7 +99,7 @@ export function normalizeGaps(raw, digest = []) {
   const seen = new Set();
 
   return (Array.isArray(raw) ? raw : [])
-    .map((gap, index) => {
+    .map((gap) => {
       const kind = isGapKind(gap?.kind) ? gap.kind : 'missing';
       const title = String(gap?.title ?? '').trim();
       if (!title) return null;
@@ -105,8 +116,13 @@ export function normalizeGaps(raw, digest = []) {
       const before = rawBefore && rawBefore.id !== after?.id ? rawBefore : null;
 
       return {
-        // Stable within a scan, which is all the UI needs to key and dismiss by.
-        id: `${kind}-${index}-${title.slice(0, 40)}`,
+        // Built from the content, not from the position in the list. A gap's
+        // question is a study card now, and a card needs an id that survives the
+        // next scan — otherwise re-finding the same hole would mint a new card
+        // and throw away everything the schedule had learned about the old one.
+        // The kind-and-title pair is already unique within a scan, because the
+        // dedupe below drops repeats of exactly that.
+        id: gapId(kind, title),
         kind,
         blockId: block?.id ?? null,
         blockLabel: block?.label ?? null,

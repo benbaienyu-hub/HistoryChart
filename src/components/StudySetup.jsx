@@ -48,6 +48,9 @@ export default function StudySetup({
   dueCount,
   weakCount,
   flaggedCount,
+  questionCount = 0,
+  askQuestions = true,
+  onAskQuestions = () => {},
   scope,
   mode,
   onScope,
@@ -147,6 +150,39 @@ export default function StudySetup({
               detail="Write what you remember first, and it marks itself against your points. Slower, and much harder to kid yourself."
             />
           </div>
+
+          {/* The scan already wrote these and they cost nothing to ask, but a
+              session about your own writing is a legitimate thing to want, so it
+              is offered rather than imposed. */}
+          {questionCount > 0 && (
+            <button
+              type="button"
+              onClick={() => onAskQuestions(!askQuestions)}
+              aria-pressed={askQuestions}
+              className={`mt-5 flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors ${
+                askQuestions ? 'border-accent bg-accent-soft' : 'border-line2 hover:bg-hover'
+              }`}
+            >
+              <span
+                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                  askQuestions ? 'border-accent bg-accent' : 'border-line2'
+                }`}
+              >
+                {askQuestions && <span className="text-[10px] leading-none text-white">✓</span>}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span
+                  className={`text-[13.5px] font-medium ${askQuestions ? 'text-accent' : 'text-ink'}`}
+                >
+                  Also ask my {questionCount} gap question{questionCount === 1 ? '' : 's'}
+                </span>
+                <span className="mt-0.5 block text-[12px] leading-snug text-subink">
+                  Written by the last scan, about what your notes are missing. Mixed in with your
+                  own cards rather than tacked on the end.
+                </span>
+              </span>
+            </button>
+          )}
 
           <button
             type="button"

@@ -5,12 +5,16 @@ import { buildDeck, flaggedCardCount, gradeCard, sessionTally } from '../lib/dec
 import { countDue, describeDue, isDue, scheduleSummary } from '../lib/review';
 import { MASTERY, MASTERY_ORDER, countLevels, masteryFor, weakCardIds } from '../lib/mastery';
 import { gradeTyped } from '../lib/recall';
+import { finalGrades, gapCards, reinsert, shouldReask } from '../lib/session';
 import StudySetup from './StudySetup';
 
 export default function StudyMode({
   nodes,
   canvasTitle,
   reviews = {},
+  // The last stored gap scan. Its questions become cards, so the deck is not
+  // only "here is a block title, tell me everything" over and over.
+  gaps = [],
   // A mastery count on the canvas was clicked: {label, ids}. The session is
   // already scoped, so it opens on the first card instead of on a setup screen
   // asking a question that has just been answered.
@@ -22,6 +26,14 @@ export default function StudyMode({
   onFinish,
 }) {
   const [seed, setSeed] = useState(1);
+  // Whether the scan's questions join the deck. On when there are any — being
+  // asked a real question is the point — but some sessions are deliberately
+  // about your own writing only, so it is a choice rather than a rule.
+  const [askQuestions, setAskQuestions] = useState(true);
+  // The session's working order, as card ids. Separate from `deck` because a
+  // card you barely had is put back into it a few places later, so the order is
+  // no longer just "the deck, once through".
+  const [queue, setQueue] = useState([]);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [restrictTo, setRestrictTo] = useState(focus?.ids ?? null);
   // Held in state rather than read from the prop: the buttons below can widen
@@ -33,12 +45,19 @@ export default function StudyMode({
   // guessing it for the user would be worse than asking once.
   const [setup, setSetup] = useState(focus ? { scope: 'all', mode: 'check' } : null);
 
-  const everything = useMemo(() => buildDeck(nodes, { flaggedOnly: false, seed: 1 }), [nodes]);
+  // The questions the scan already wrote, as cards. Free — they were generated
+  // and stored when the canvas was scanned, so this costs no model call.
+  const questions = useMemo(() => (askQuestions ? gapCards(gaps) : []), [gaps, askQuestions]);
+
+  const everything = useMemo(
+    () => buildDeck(nodes, { flaggedOnly: false, seed: 1, extra: questions }),
+    [nodes, questions]
+  );
   const dueTotal = countDue(everything, reviews);
   const weakCount = useMemo(() => weakCardIds(nodes, reviews).length, [nodes, reviews]);
 
   const deck = useMemo(() => {
-    const built = buildDeck(nodes, { flaggedOnly, seed, restrictTo });
+    const built = buildDeck(nodes, { flaggedOnly, seed, restrictTo, extra: questions });
     // Scopes are filters over the same deck rather than different decks, so the
     // shuffle, the flag filter and the retry list all still apply.
     if (setup?.scope === 'due') return built.filter((c) => isDue(reviews[c.id]));
@@ -47,7 +66,7 @@ export default function StudyMode({
       return built.filter((c) => weak.has(c.id));
     }
     return built;
-  }, [nodes, flaggedOnly, seed, restrictTo, setup?.scope, reviews]);
+  }, [nodes, flaggedOnly, seed, restrictTo, setup?.scope, reviews, questions]);
 
   const [index, setIndex] = useState(0);
   const [revealed, setRevealed] = useState(false);
@@ -70,11 +89,21 @@ export default function StudyMode({
   useEffect(() => {
     if (dueTotal === 0) setPendingScope((current) => (current === 'due' ? 'all' : current));
   }, [dueTotal]);
-  const card = deck[index];
+  const byId = useMemo(() => new Map(deck.map((c) => [c.id, c])), [deck]);
+  const card = byId.get(queue[index]);
   // Memoised so the key handler's deps don't churn on every render — the empty
   // fallback would otherwise be a new array each time.
   const points = useMemo(() => card?.points ?? [], [card]);
   const single = points.length === 1;
+
+  // The queue follows the deck, except while the summary is up: the deck is
+  // recomputed when the new schedules come back, and rebuilding then would reset
+  // a session that has already finished.
+  useEffect(() => {
+    if (done) return;
+    setQueue(deck.map((c) => c.id));
+    setIndex(0);
+  }, [deck, done]);
 
   const restart = useCallback((opts = {}) => {
     setIndex(0);
@@ -99,14 +128,25 @@ export default function StudyMode({
   const commit = useCallback(
     (recalled) => {
       if (!card) return;
-      const next = [...grades, gradeCard(card, recalled)];
+      const graded = gradeCard(card, recalled);
+      const next = [...grades, graded];
       setGrades(next);
 
-      if (index + 1 >= deck.length) {
+      // A card you barely had comes back a few places later in this same session.
+      // Being asked twice, with other cards in between, is the difference between
+      // reading an answer and retrieving it — and the second attempt is the one
+      // that counts.
+      const queueNow = shouldReask(graded) ? reinsert(queue, index, card.id) : queue;
+      if (queueNow !== queue) setQueue(queueNow);
+
+      if (index + 1 >= queueNow.length) {
         setDone(true);
+        // Only the last attempt at each card is submitted: two grades for one
+        // block would file two schedules and count it twice in the score.
+        const settled = finalGrades(next);
         // The grades go to the server, which decides when each card comes back and
         // hands the new schedule straight back for the summary.
-        onFinish?.(next)?.then?.((states) => setScheduled(states ?? null));
+        onFinish?.(settled)?.then?.((states) => setScheduled(states ?? null));
       } else {
         setIndex((i) => i + 1);
         setRevealed(false);
@@ -115,7 +155,7 @@ export default function StudyMode({
         setMatches(null);
       }
     },
-    [card, grades, index, deck.length, onFinish]
+    [card, grades, index, queue, onFinish]
   );
 
   // Typed mode: the matcher pre-fills the checklist, and the user can overrule it.
@@ -219,6 +259,9 @@ export default function StudyMode({
         dueCount={dueTotal}
         weakCount={weakCount}
         flaggedCount={flaggedCount}
+        questionCount={gapCards(gaps).length}
+        askQuestions={askQuestions}
+        onAskQuestions={setAskQuestions}
         scope={pendingScope}
         mode={pendingMode}
         onScope={setPendingScope}
@@ -235,7 +278,9 @@ export default function StudyMode({
   }
 
   if (done) {
-    const tally = sessionTally(grades);
+    // The final attempt at each card, so a card asked twice is one line in the
+    // score rather than two.
+    const tally = sessionTally(finalGrades(grades));
     // Where the cards just studied now stand. Computed from the rows the server
     // sent back, so this and the canvas cannot disagree.
     const standing = countLevels(
@@ -417,12 +462,12 @@ export default function StudyMode({
           <div className="h-1 flex-1 overflow-hidden rounded-full bg-black/10">
             <motion.div
               className="h-full rounded-full bg-accent"
-              animate={{ width: `${((index + (revealed ? 1 : 0)) / deck.length) * 100}%` }}
+              animate={{ width: `${((index + (revealed ? 1 : 0)) / queue.length) * 100}%` }}
               transition={{ type: 'spring', stiffness: 200, damping: 26 }}
             />
           </div>
           <span className="shrink-0 text-[12px] tabular-nums text-subink">
-            {index + 1} / {deck.length}
+            {index + 1} / {queue.length}
           </span>
         </div>
       </div>
@@ -439,13 +484,31 @@ export default function StudyMode({
               className="rounded-3xl border border-line bg-panel p-7 shadow-[0_16px_48px_-16px_rgba(0,0,0,0.2)]"
             >
               <div className="flex items-center gap-2">
-                <span
-                  className="h-2 w-2 rounded-full"
-                  style={{ backgroundColor: categoryColor(card.category) }}
-                />
-                <span className="text-[11px] font-medium uppercase tracking-wide text-subink">
-                  {categoryLabel(card.category)}
-                </span>
+                {/* A question the gap scan wrote, not a block you made. Said out
+                    loud because the rest of the deck is your own writing, and the
+                    answer you are about to be shown is not — which is a
+                    distinction this app should never blur. */}
+                {card.gap ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-accent">
+                    <span aria-hidden="true">🔍</span>
+                    From your gaps
+                    {card.gap.about && (
+                      <span className="font-medium normal-case tracking-normal opacity-80">
+                        · {card.gap.about}
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <>
+                    <span
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: categoryColor(card.category) }}
+                    />
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-subink">
+                      {categoryLabel(card.category)}
+                    </span>
+                  </>
+                )}
                 {card.unsure && (
                   <span className="rounded-full bg-warn-bg px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warn">
                     flagged

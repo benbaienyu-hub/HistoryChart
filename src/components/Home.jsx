@@ -788,6 +788,7 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
         id: canvas.id,
         title: canvas.title,
         nodes: canvas.nodes ?? [],
+        gaps: canvas.gaps ?? [],
         reviews: reviews[canvas.id] ?? {},
       }))
     );
@@ -796,6 +797,7 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
       <StudyMode
         nodes={merged.nodes}
         reviews={merged.reviews}
+        gaps={merged.gaps}
         canvasTitle="Everything"
         mixed
         onFinish={finishStudyAll}
