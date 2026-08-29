@@ -153,6 +153,13 @@ The collections are defined in `server/stores/document.js`: `users`, `sessions`,
   block, stored server-side so a client cannot inflate its own intervals.
 - **Mastery.** `src/lib/mastery.js` derives Untested / Weak / Learning / Mastered
   from the review rows and paints it back onto each block.
+- **Coverage and mastery.** `src/lib/progress.js` turns the same data into the two
+  percentages the library leads with. They are deliberately separate numbers:
+  coverage is how much is written down, mastery is how much of it comes back.
+  Coverage counts the last scan's *missing* gaps in its denominator, which is why
+  it is dimmed until a canvas has been scanned. The scan itself is stored on the
+  canvas record (`gaps`, `gapsScannedAt`, `gapsSignature`) so the library does not
+  need a model call per canvas.
 
 ## Commands
 

@@ -87,16 +87,23 @@ describe('the disk backend', () => {
 describe('the blob backend', () => {
   const calls = { put: [], get: [], del: [] };
   let rejectAccess = null;
+  // Set by a test to make the next upload fail outright, through the same mock
+  // the rest of the block uses. Re-mocking the module mid-test and leaning on
+  // vi.resetModules() to pick it up worked most of the time, which is the worst
+  // amount of the time for a test to work.
+  let failWith = null;
 
   beforeEach(() => {
     calls.put = [];
     calls.get = [];
     calls.del = [];
     rejectAccess = null;
+    failWith = null;
 
     vi.doMock('@vercel/blob', () => ({
       put: async (pathname, body, options) => {
         calls.put.push({ pathname, options, size: body.length });
+        if (failWith) throw new Error(failWith);
         if (rejectAccess && options.access === rejectAccess) {
           throw new Error('This store does not allow public access for blobs.');
         }
@@ -157,18 +164,11 @@ describe('the blob backend', () => {
   });
 
   it('passes an unrelated failure straight through rather than retrying', async () => {
-    vi.doMock('@vercel/blob', () => ({
-      put: async () => {
-        throw new Error('Request Entity Too Large');
-      },
-      get: async () => null,
-      del: async () => {},
-    }));
-    // Without this the dynamic import inside fileStorage resolves the mock
-    // registered in beforeEach, and the override above silently does nothing.
-    vi.resetModules();
-    resetFileStorageForTests();
+    // Only the access-mismatch error is worth a second attempt. Anything else —
+    // a file too big, a bad token — means retrying just fails again more slowly.
+    failWith = 'Request Entity Too Large';
     await expect(fileStorage().put('abc.png', BYTES, 'image/png')).rejects.toThrow(/Too Large/);
+    expect(calls.put).toHaveLength(1);
   });
 
   it('reads through the authenticated SDK, not a bare fetch of the URL', async () => {

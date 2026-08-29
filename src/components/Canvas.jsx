@@ -37,6 +37,12 @@ import {
   masteryByBlock,
   withMastery,
 } from '../lib/mastery';
+import {
+  canvasProgress,
+  describeCoverage,
+  describeMasteryScore,
+  formatPct,
+} from '../lib/progress';
 import { categoryColor } from '../lib/categories';
 import { appendPoints } from '../lib/gaps';
 import { isSuggestionId, planInsertion, suggestionGraph, suggestionId } from '../lib/suggestions';
@@ -158,7 +164,11 @@ function CanvasEditor({ user, record, onExit }) {
   const [addingChildId, setAddingChildId] = useState(null);
   const [searchValue, setSearchValue] = useState('');
   const [gapsOpen, setGapsOpen] = useState(false);
-  const [gaps, setGaps] = useState([]);
+  // Seeded from the last stored scan, so reopening a canvas does not throw away
+  // a review that has already been paid for — and so the suggestions are drawn
+  // straight away rather than only after scanning again.
+  const [gaps, setGaps] = useState(() => (Array.isArray(record?.gaps) ? record.gaps : []));
+  const [gapsScannedAt, setGapsScannedAt] = useState(record?.gapsScannedAt ?? null);
   const [gapsBusy, setGapsBusy] = useState(false);
   const [gapError, setGapError] = useState(null);
   // Which gaps have been applied in this scan, so the button can say "Added ✓"
@@ -228,6 +238,12 @@ function CanvasEditor({ user, record, onExit }) {
   // whole point of keeping review state in the canvas rather than only in study
   // mode: you come back from a session and the canvas has changed.
   const rendered = useMemo(() => withMastery(visible.nodes, reviews), [visible.nodes, reviews]);
+  // The same two numbers the library shows, from the same rules — so a canvas
+  // cannot disagree with its own card in the library.
+  const progress = useMemo(
+    () => canvasProgress({ nodes, gaps, reviews }),
+    [nodes, gaps, reviews]
+  );
   const masteryLevels = useMemo(() => masteryByBlock(nodes, reviews), [nodes, reviews]);
   const mastery = useMemo(() => countLevels(masteryLevels), [masteryLevels]);
   const studiedCount = mastery.weak + mastery.learning + mastery.mastered;
@@ -941,11 +957,13 @@ function CanvasEditor({ user, record, onExit }) {
     // suggestions would be treated as ones already shown and never framed.
     framedGhostIds.current = new Set();
     try {
-      const { gaps } = await findGaps({
+      const { gaps, scannedAt } = await findGaps({
         title,
+        canvasId,
         nodes: liveRef.current.nodes.map((n) => ({ id: n.id, data: n.data })),
       });
       setGaps(gaps);
+      setGapsScannedAt(scannedAt);
       // A fresh scan invalidates what was applied from the last one: the ids are
       // per-scan, and a gap you filled may legitimately come back if it is still
       // thin.
@@ -1388,12 +1406,48 @@ function CanvasEditor({ user, record, onExit }) {
           zeroes explaining a feature you have not used. Each count is a button:
           seeing that four blocks are weak and then having to go and reconstruct
           which four in the study setup is the exact seam this is meant to close. */}
-      {studiedCount > 0 && (
+      {(progress.coverage || studiedCount > 0) && (
         <div
           className={`absolute left-4 z-10 flex items-center gap-0.5 rounded-full border border-line bg-surface px-1.5 py-1 shadow-[0_4px_16px_-4px_rgba(0,0,0,0.18)] backdrop-blur-xl ${
             saveError || !canEdit ? 'top-[104px]' : 'top-[69px]'
           }`}
         >
+          {/* The two headline numbers, then the breakdown you can act on. They
+              answer different questions — how much is written down, and how much
+              of it you can actually produce — and averaging them into one bar
+              would tell somebody who has written everything and studied nothing
+              the same thing as somebody in the opposite position. */}
+          {progress.coverage && (
+            <span
+              title={describeCoverage(progress.coverage, { scanned: progress.scanned })}
+              className="whitespace-nowrap px-2 py-1 text-[12px]"
+            >
+              {/* Dimmed until a scan, for the same reason as in the library: with
+                  no scan it can only see the blocks you left empty. */}
+              <span
+                className={`font-semibold tabular-nums ${
+                  progress.scanned ? 'text-ink' : 'text-subink'
+                }`}
+              >
+                {formatPct(progress.coverage)}
+              </span>{' '}
+              <span className={progress.scanned ? 'text-subink' : 'text-subink/70'}>coverage</span>
+            </span>
+          )}
+          {progress.mastery && (
+            <span
+              title={describeMasteryScore(progress.mastery)}
+              className="whitespace-nowrap px-2 py-1 text-[12px]"
+            >
+              <span className="font-semibold tabular-nums text-ink">
+                {formatPct(progress.mastery)}
+              </span>{' '}
+              <span className="text-subink">mastery</span>
+            </span>
+          )}
+
+          {studiedCount > 0 && <span className="mx-0.5 h-4 w-px bg-line2" />}
+
           {MASTERY_ORDER.filter((key) => mastery[key] > 0).map((key) => (
             <button
               key={key}
@@ -1484,6 +1538,7 @@ function CanvasEditor({ user, record, onExit }) {
             error={gapError}
             filledIds={filledGapIds}
             dismissedIds={dismissedGapIds}
+            scannedAt={gapsScannedAt}
             onFill={handleFillGap}
             onJump={handleJumpToBlock}
             onRescan={handleFindGaps}

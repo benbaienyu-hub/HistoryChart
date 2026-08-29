@@ -712,6 +712,57 @@ genuinely change the session:
 **How** — *Self-check* (recall it in your head, reveal, tick what you had), or
 *Type the answer*.
 
+### Coverage and mastery are two numbers, not one
+
+A single progress bar averages away the only thing worth knowing. Someone can
+have notes on almost their whole syllabus and remember 40% of it; someone else
+can have written half as much and know all of it cold. Those are opposite
+problems with opposite fixes — *go and study* versus *go and write* — and one
+number gives both people the same useless advice. So the library and the canvas
+both show:
+
+```
+Cold War        100% coverage ·  0% mastery · not scanned · 3 due
+Cell Biology     67% coverage · 67% mastery ·      3 gaps · 0 due
+Macroeconomics   33% coverage ·  0% mastery · not scanned · 1 due
+```
+
+**Coverage** — how much of what belongs here is written down at all. The honest
+difficulty is what it is a percentage *of*: there is no syllabus in this app, so
+the denominator is what the canvas itself knows about — the blocks you filled in,
+the blocks you left empty, and the ideas the last scan said are **missing**.
+(*Incorrect* and *incomplete* gaps are deliberately excluded: those are about a
+block that exists and has words in it, so counting them here would mark the same
+block down twice for the same fault.)
+
+This is why **coverage means little until a canvas has been scanned**, and why it
+is shown dimmed until then — with no scan it can only see the blocks you left
+empty, so a three-block canvas about the Cold War reads "100%", true only in the
+sense that you have written everything you thought of. Once scanned it means
+something.
+
+**Mastery** — of what is written, how much comes back. Counted in *points*, not
+cards, because that is the unit this app grades in: it is literally "last time
+you were asked, this share of your points came back". A card never studied
+contributes **zero** of its points. That is the uncomfortable choice and it is
+the right one — mastery answers "how much of this do I know", and not having
+checked is not evidence of knowing. Excluding untested cards would let a canvas
+where you studied one card and aced it read 100%. Hovering says how many cards
+are being counted as unknown, and a canvas with nothing studied says so in words
+rather than showing a bare 0%.
+
+**Gaps** comes from the last scan, which is now stored on the canvas — otherwise
+the library would need a model call per canvas to show a number. "0 gaps" and
+"never looked" are different facts, so an unscanned canvas says **not scanned**
+rather than claiming zero. A scan is marked **(stale)** once the notes it read
+have been rewritten — measured by a fingerprint of the words, not by a timestamp,
+because the canvas saves itself for all sorts of reasons that leave the text
+alone.
+
+The stored scan is also why reopening a canvas draws its suggestions straight
+away instead of making you pay for the same review twice, and why the panel says
+how long ago it ran.
+
 ### Mastery, on the canvas
 
 The canvas and the flashcards used to be two features that happened to share
@@ -877,6 +928,7 @@ hardcode white or black and both themes stay in sync.
 | `src/lib/deck.js` | Flashcard selection, point splitting, and per-point grading |
 | `src/lib/review.js` | The scheduler — intervals, ease, what's due |
 | `src/lib/mastery.js` | Untested / Weak / Learning / Mastered, derived from review rows |
+| `src/lib/progress.js` | Coverage and mastery percentages, and whether a stored scan is stale |
 | `src/lib/recall.js` | Matching typed free recall against a card's points |
 | `src/components/StudySetup.jsx` | The what-and-how screen before a session |
 | `server/reviewRoutes.js` | Per-user review state; the server owns the scheduling |

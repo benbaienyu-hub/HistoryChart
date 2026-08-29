@@ -12,6 +12,7 @@ import { resetThrottleForTests } from '../server/accounts.js';
 import { mutate, resetStoreForTests, setDataPathForTests, usePostgresForTests } from '../server/store.js';
 import { resetFileStorageForTests } from '../server/fileStorage.js';
 import { resetSecretCacheForTests } from '../server/secretBox.js';
+import { setEnvFileForTests } from '../server/aiConfig.js';
 
 // The same suite runs against either backend. Set TEST_POSTGRES_URL and every test
 // below is exercised against a real Postgres — which is the only way to know the
@@ -580,6 +581,142 @@ describe('images', () => {
     const { json } = await ben.call('POST', '/api/canvases', {});
     const uploaded = await upload(ben, json.canvas.id, { name: 'diagram — draft 🇪🇹.png' });
     expect(uploaded.json.image.name).toBe('diagram — draft 🇪🇹.png');
+  });
+});
+
+describe('the stored gap scan', () => {
+  // The scan is what lets the library show a gap count per canvas without a model
+  // call per canvas. It is also the first thing this app writes to a canvas that
+  // the user did not type, so who may write it matters.
+  async function canvasToScan(person, title = 'Suez') {
+    const { json } = await person.call('POST', '/api/canvases', {
+      title,
+      nodes: [{ id: 'b1', data: { label: 'Nationalisation', notes: 'Nasser, 1956.' } }],
+    });
+    return json.canvas;
+  }
+
+  const scan = (person, canvas) =>
+    person.call('POST', '/api/gaps', {
+      title: canvas.title,
+      canvasId: canvas.id,
+      nodes: canvas.nodes,
+    });
+
+  beforeEach(() => {
+    setEnvFileForTests(null);
+    process.env.OPENAI_MOCK = '1';
+  });
+
+  afterEach(() => {
+    delete process.env.OPENAI_MOCK;
+  });
+
+  it('is empty until a canvas has been scanned', async () => {
+    // Not an empty list: "no gaps" and "never looked" are different facts, and
+    // the library shows them differently.
+    const ben = await signedUp('ben@example.com');
+    const canvas = await canvasToScan(ben);
+    expect(canvas.gaps).toBeNull();
+    expect(canvas.gapsScannedAt).toBeNull();
+  });
+
+  it('keeps the result on the canvas, so the library can count without spending', async () => {
+    const ben = await signedUp('ben@example.com');
+    const canvas = await canvasToScan(ben);
+
+    const { status, json } = await scan(ben, canvas);
+    expect(status).toBe(200);
+    expect(json.gaps.length).toBeGreaterThan(0);
+    expect(json.scannedAt).toBeGreaterThan(0);
+
+    const listed = (await ben.call('GET', '/api/canvases')).json.owned[0];
+    expect(listed.gaps).toHaveLength(json.gaps.length);
+    expect(listed.gapsScannedAt).toBe(json.scannedAt);
+  });
+
+  it('does not count as an edit', async () => {
+    // updatedAt drives "stale" on the library card. If scanning bumped it, every
+    // scan would immediately mark its own result out of date.
+    const ben = await signedUp('ben@example.com');
+    const canvas = await canvasToScan(ben);
+    await scan(ben, canvas);
+    const listed = (await ben.call('GET', '/api/canvases')).json.owned[0];
+    expect(listed.updatedAt).toBe(canvas.updatedAt);
+  });
+
+  it('replaces the previous scan rather than piling up', async () => {
+    const ben = await signedUp('ben@example.com');
+    const canvas = await canvasToScan(ben);
+    const first = await scan(ben, canvas);
+    const second = await scan(ben, canvas);
+    const listed = (await ben.call('GET', '/api/canvases')).json.owned[0];
+    expect(listed.gaps).toHaveLength(second.json.gaps.length);
+    expect(listed.gapsScannedAt).toBeGreaterThanOrEqual(first.json.scannedAt);
+  });
+
+  it('lets an editor scan, and the owner sees it', async () => {
+    // A gap is a fact about the notes, not about a reader, so a shared canvas has
+    // one scan rather than one per person.
+    const ben = await signedUp('ben@example.com');
+    const ada = await signedUp('ada@example.com');
+    const canvas = await canvasToScan(ben);
+    await ben.call('POST', `/api/canvases/${canvas.id}/share`, {
+      email: 'ada@example.com',
+      role: 'edit',
+    });
+
+    await scan(ada, canvas);
+    expect((await ben.call('GET', '/api/canvases')).json.owned[0].gaps).not.toBeNull();
+  });
+
+  it('will not let a view-only reader write to somebody else’s canvas', async () => {
+    // They still get their gaps back and see them on screen — they just do not
+    // leave anything behind in a record that is not theirs.
+    const ben = await signedUp('ben@example.com');
+    const cara = await signedUp('cara@example.com');
+    const canvas = await canvasToScan(ben);
+    await ben.call('POST', `/api/canvases/${canvas.id}/share`, {
+      email: 'cara@example.com',
+      role: 'view',
+    });
+
+    const { status, json } = await scan(cara, canvas);
+    expect(status).toBe(200);
+    expect(json.gaps.length).toBeGreaterThan(0);
+    expect(json.scannedAt).toBeNull();
+    expect((await ben.call('GET', '/api/canvases')).json.owned[0].gaps).toBeNull();
+  });
+
+  it('ignores a canvas id belonging to somebody else entirely', async () => {
+    const ben = await signedUp('ben@example.com');
+    const stranger = await signedUp('nope@example.com');
+    const canvas = await canvasToScan(ben);
+
+    const { status, json } = await scan(stranger, canvas);
+    expect(status).toBe(200);
+    expect(json.scannedAt).toBeNull();
+    expect((await ben.call('GET', '/api/canvases')).json.owned[0].gaps).toBeNull();
+  });
+
+  it('still answers when no canvas id is sent at all', async () => {
+    const ben = await signedUp('ben@example.com');
+    const canvas = await canvasToScan(ben);
+    const { status, json } = await ben.call('POST', '/api/gaps', {
+      title: canvas.title,
+      nodes: canvas.nodes,
+    });
+    expect(status).toBe(200);
+    expect(json.gaps.length).toBeGreaterThan(0);
+    expect(json.scannedAt).toBeNull();
+  });
+
+  it('forgets the scan when the canvas is deleted', async () => {
+    const ben = await signedUp('ben@example.com');
+    const canvas = await canvasToScan(ben);
+    await scan(ben, canvas);
+    await ben.call('DELETE', `/api/canvases/${canvas.id}`);
+    expect((await ben.call('GET', '/api/canvases')).json.owned).toHaveLength(0);
   });
 });
 

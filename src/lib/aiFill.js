@@ -139,14 +139,17 @@ export async function expandTopic({ topic, level, context, maxSubtopics }) {
 // "Find my gaps": one request for the whole canvas, answered with a list of holes
 // rather than with finished notes. Replaced "Fill my knowledge", which handed back
 // a written answer — reading a good answer feels like learning and isn't.
-export async function findGaps({ title, nodes }) {
+// `canvasId` is what lets the server keep the result, so the library can show a
+// gap count without a model call per canvas and reopening a canvas does not
+// discard a scan already paid for.
+export async function findGaps({ title, nodes, canvasId = null }) {
   let response;
   try {
     response = await fetch('/api/gaps', {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title, nodes }),
+      body: JSON.stringify({ title, nodes, canvasId }),
     });
   } catch (cause) {
     throw new Error(
@@ -170,5 +173,10 @@ export async function findGaps({ title, nodes }) {
     throw new Error(body.error ?? `Request failed (${response.status})`);
   }
 
-  return { gaps: Array.isArray(body.gaps) ? body.gaps : [], refused: Boolean(body.refused) };
+  return {
+    gaps: Array.isArray(body.gaps) ? body.gaps : [],
+    refused: Boolean(body.refused),
+    // Null when the server did not keep it — no canvas id, or view-only access.
+    scannedAt: body.scannedAt ?? null,
+  };
 }

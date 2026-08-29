@@ -11,6 +11,12 @@ import {
 } from '../lib/canvasSearch';
 import { buildTemplateGraph, listTemplates } from '../lib/templates';
 import { countDue } from '../lib/review';
+import {
+  canvasProgress,
+  describeCoverage,
+  describeMasteryScore,
+  formatPct,
+} from '../lib/progress';
 import Logo from './Logo';
 import ShareDialog from './ShareDialog';
 import AccountSettings from './AccountSettings';
@@ -159,7 +165,90 @@ function formatUpdated(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
-function CanvasCard({ canvas, index, onOpen, actions, terms = [], matchedBlocks = [], due = 0 }) {
+// The two numbers a single progress bar would average into uselessness, plus the
+// two counts that say what to do about them.
+//
+// Coverage and mastery are separated because they are separate problems with
+// separate fixes: 95% coverage and 40% mastery means go and study, 60% coverage
+// and 100% mastery means go and write. One combined number would give both
+// people the same unhelpful advice.
+function CanvasMetrics({ progress, due }) {
+  const { coverage, mastery, scanned, gapCount, stale } = progress;
+  if (!coverage && !mastery && due === 0) return null;
+
+  return (
+    <p className="mt-1.5 flex flex-wrap items-center text-[11px] leading-relaxed">
+      {/* Coverage is dimmed until the canvas has been scanned. Before that it can
+          only see the blocks you left empty — it has no way of knowing what is
+          missing entirely, so a confident "100%" would be a claim the app cannot
+          support. */}
+      <Metric
+        title={describeCoverage(coverage, { scanned })}
+        value={formatPct(coverage)}
+        label="coverage"
+        dim={!scanned}
+        first
+      />
+      <Metric title={describeMasteryScore(mastery)} value={formatPct(mastery)} label="mastery" />
+
+      {/* "0 gaps" and "never looked" are different facts, and only one of them is
+          something this app can claim. */}
+      {scanned ? (
+        <Metric
+          title={
+            stale
+              ? 'From the last scan, which ran before the most recent edits — scan again for a current count.'
+              : 'Holes the last scan found: missing ideas, wrong claims and thin explanations.'
+          }
+          value={gapCount}
+          label={`gap${gapCount === 1 ? '' : 's'}${stale ? ' (stale)' : ''}`}
+          tone={gapCount > 0 ? 'text-warn' : undefined}
+        />
+      ) : (
+        <Metric
+          title="Open this canvas and run Find my gaps. Until then coverage only counts blocks you left empty — it cannot know what is missing entirely."
+          label="not scanned"
+          dim
+        />
+      )}
+
+      <Metric
+        title="Cards the schedule says are ready, plus any never studied."
+        value={due}
+        label="due"
+        tone={due > 0 ? 'text-accent' : undefined}
+      />
+    </p>
+  );
+}
+
+// One measurement, carrying its own separator. The separator lives *inside* the
+// segment rather than between segments so that a row wrapping mid-way — which it
+// does at this card width — never strands a "·" at the end of a line.
+function Metric({ title, value, label, tone, dim = false, first = false }) {
+  return (
+    <span title={title} className="whitespace-nowrap">
+      {!first && <span className="px-1 text-subink/40">·</span>}
+      {value !== undefined && (
+        <span className={`font-semibold tabular-nums ${tone ?? (dim ? 'text-subink' : 'text-ink')}`}>
+          {value}{' '}
+        </span>
+      )}
+      <span className={tone ?? (dim ? 'text-subink/70' : 'text-subink')}>{label}</span>
+    </span>
+  );
+}
+
+function CanvasCard({
+  canvas,
+  index,
+  onOpen,
+  actions,
+  terms = [],
+  matchedBlocks = [],
+  due = 0,
+  progress,
+}) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(canvas.title);
 
@@ -218,17 +307,7 @@ function CanvasCard({ canvas, index, onOpen, actions, terms = [], matchedBlocks 
         </p>
       )}
 
-      {due > 0 && (
-        <p className="mt-1 text-[11.5px] font-medium text-accent">
-          {due} card{due === 1 ? '' : 's'} due
-        </p>
-      )}
-
-      {canvas.lastScore && (
-        <p className="mt-1 text-[11.5px] text-subink">
-          Last studied {canvas.lastScore.correct}/{canvas.lastScore.total} points
-        </p>
-      )}
+      <CanvasMetrics progress={progress} due={due} />
 
       {!actions.readOnly && (
         <div className="mt-3 flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
@@ -370,6 +449,20 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
         (canvas.nodes ?? []).filter((n) => n.data?.notes?.trim()),
         reviews[canvas.id] ?? {}
       ),
+    [reviews]
+  );
+
+  // Coverage and mastery for a card. Both are computed here from data the list
+  // already returns — nodes, the stored scan, and this user's review rows — so
+  // the library costs the same two requests it always did.
+  const progressFor = useCallback(
+    (canvas) =>
+      canvasProgress({
+        nodes: canvas.nodes ?? [],
+        gaps: canvas.gaps,
+        reviews: reviews[canvas.id] ?? {},
+        signature: canvas.gapsSignature,
+      }),
     [reviews]
   );
 
@@ -682,6 +775,7 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
                     key={canvas.id}
                     canvas={canvas}
                     due={dueFor(canvas)}
+                    progress={progressFor(canvas)}
                     index={i}
                     onOpen={onOpenCanvas}
                     actions={ownedActions}
@@ -709,6 +803,7 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
                     key={canvas.id}
                     canvas={canvas}
                     due={dueFor(canvas)}
+                    progress={progressFor(canvas)}
                     index={i}
                     onOpen={onOpenCanvas}
                     actions={{ readOnly: true }}

@@ -51,6 +51,13 @@ function serialize(db, canvas, user) {
     nodes: canvas.nodes,
     edges: canvas.edges,
     lastScore: canvas.lastScore ?? null,
+    // The last "Find my gaps" result, kept so the library can say how many holes
+    // a canvas has without running a model call per canvas, and so the panel
+    // still has something to show after a reload. Stored on the canvas rather
+    // than per user because a gap is a fact about the notes, not about a reader.
+    gaps: Array.isArray(canvas.gaps) ? canvas.gaps : null,
+    gapsScannedAt: canvas.gapsScannedAt ?? null,
+    gapsSignature: canvas.gapsSignature ?? null,
     createdAt: canvas.createdAt,
     updatedAt: canvas.updatedAt,
     ownerEmail: db.users.find((u) => u.id === canvas.ownerId)?.email ?? '',

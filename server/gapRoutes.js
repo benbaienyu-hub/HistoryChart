@@ -11,8 +11,11 @@
 // "Find my gaps" costs exactly one call however much you do with the result.
 
 import { canvasDigest, normalizeGaps } from '../src/lib/gaps.js';
+import { notesSignature } from '../src/lib/progress.js';
 import { callModel } from './modelCall.js';
 import { credentialsForUser, mockEnabled } from './aiConfig.js';
+import { accessFor } from './canvasRoutes.js';
+import { mutate, readDb } from './store.js';
 import { readJsonBody, send } from './http.js';
 
 const GAP_SCHEMA = {
@@ -207,6 +210,46 @@ export async function generateGaps({ title, nodes }, credentials) {
   return { gaps: normalizeGaps(parsed?.gaps, digest), digest };
 }
 
+// Keep the result, so the library can say how many holes a canvas has without a
+// model call per canvas, and so reopening a canvas does not throw away a scan
+// that has already been paid for.
+//
+// Only when the user can edit. A view-only reader still gets the gaps back and
+// sees them on the canvas — they just do not write anything into somebody else's
+// record. Storing is best-effort: a scan that cannot be saved is still a scan,
+// and failing the whole request over the bookkeeping would be worse than the
+// library being one number out of date.
+//
+// `updatedAt` is deliberately untouched. Bumping it would make every scan look
+// like an edit, which would immediately mark its own result stale.
+async function storeScan(canvasId, gaps, nodes, user) {
+  if (!canvasId) return null;
+  try {
+    const db = await readDb();
+    const role = accessFor(db, byIdOrNull(db, canvasId), user);
+    if (role !== 'owner' && role !== 'edit') return null;
+
+    const scannedAt = Date.now();
+    await mutate((doc) => {
+      const row = doc.canvases.find((c) => c.id === canvasId);
+      if (!row) return;
+      row.gaps = gaps;
+      row.gapsScannedAt = scannedAt;
+      // What the scan read, so "stale" can mean the notes changed rather than
+      // the record being written — the canvas saves itself right after a scan.
+      row.gapsSignature = notesSignature(nodes);
+    });
+    return scannedAt;
+  } catch (error) {
+    console.error('[gaps] could not store the scan:', error);
+    return null;
+  }
+}
+
+function byIdOrNull(db, id) {
+  return db.canvases.find((c) => c.id === id) ?? null;
+}
+
 export async function handleFindGaps(req, res, user) {
   const body = await readJsonBody(req);
   const nodes = Array.isArray(body.nodes) ? body.nodes : [];
@@ -228,7 +271,8 @@ export async function handleFindGaps(req, res, user) {
 
   try {
     const { gaps } = await generateGaps({ title: body.title, nodes }, credentials);
-    return send(res, 200, { gaps });
+    const scannedAt = await storeScan(body.canvasId, gaps, nodes, user);
+    return send(res, 200, { gaps, scannedAt });
   } catch (error) {
     if (error.code === 'REFUSED') {
       return send(res, 200, { gaps: [], refused: true });

@@ -7,6 +7,7 @@ import {
   suggestibleGaps,
   suggestionId,
 } from '../lib/suggestions';
+import { formatAge } from '../lib/progress';
 
 // The result of "Find my gaps": a list of holes, each with three ways to respond.
 //
@@ -168,6 +169,7 @@ export default function GapPanel({
   error,
   filledIds,
   dismissedIds,
+  scannedAt = null,
   onFill,
   onJump,
   onRescan,
@@ -202,6 +204,11 @@ export default function GapPanel({
           <h2 className="text-[14px] font-semibold tracking-tight text-ink">Your gaps</h2>
           <p className="mt-0.5 text-[11.5px] text-subink">
             {busy ? 'Reading your canvas…' : describeGaps(gaps)}
+            {/* A scan restored from a previous visit should not read as one that
+                just ran — it is an opinion about the notes as they were. */}
+            {!busy && scannedAt && gaps.length > 0 && (
+              <span className="text-subink/70"> · scanned {formatAge(scannedAt)}</span>
+            )}
           </p>
         </div>
         <button
