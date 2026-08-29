@@ -17,6 +17,8 @@ import {
   describeMasteryScore,
   formatPct,
 } from '../lib/progress';
+import { describeLibrary, librarySummary, nextAction, weakestBlocks } from '../lib/library';
+import { countMastery } from '../lib/mastery';
 import Logo from './Logo';
 import ShareDialog from './ShareDialog';
 import AccountSettings from './AccountSettings';
@@ -236,6 +238,118 @@ function Metric({ title, value, label, tone, dim = false, first = false }) {
       )}
       <span className={tone ?? (dim ? 'text-subink/70' : 'text-subink')}>{label}</span>
     </span>
+  );
+}
+
+// Where you stand, and the one thing worth doing about it.
+//
+// The home screen used to answer only "what do I have" — a grid of cards. The
+// question you arrive with is "what should I do now", and everything needed to
+// answer it was already on the page, just never added up.
+//
+// One recommendation, not a menu. A home screen offering five equally-weighted
+// things to do is one that has not decided, and deciding is the part you came
+// here for.
+function NextUp({ totals, action, onOpen }) {
+  const line = describeLibrary(totals);
+
+  return (
+    <motion.section
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 260, damping: 26 }}
+      className="mt-5 rounded-2xl border border-line bg-surface px-5 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_-16px_rgba(0,0,0,0.14)] backdrop-blur-xl"
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-subink/80">
+          Across {totals.canvases} canvas{totals.canvases === 1 ? '' : 'es'}
+        </p>
+        <p className="flex items-baseline gap-1.5 text-[12.5px]">
+          <span className="font-semibold tabular-nums text-ink">{formatPct(totals.coverage)}</span>
+          <span className="text-subink">coverage</span>
+          <span className="px-0.5 text-subink/40">·</span>
+          <span className="font-semibold tabular-nums text-ink">{formatPct(totals.mastery)}</span>
+          <span className="text-subink">mastery</span>
+        </p>
+      </div>
+
+      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+        <div className="min-w-0">
+          <p className="text-[15px] font-semibold tracking-tight text-ink">{action.label}</p>
+          <p className="mt-0.5 text-[12.5px] leading-snug text-subink">{action.detail}</p>
+        </div>
+
+        {action.canvasId ? (
+          <motion.button
+            type="button"
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => onOpen(action.canvasId)}
+            className="shrink-0 rounded-full bg-accent px-4 py-2 text-[13px] font-medium text-white shadow-[0_2px_8px_rgba(0,113,227,0.35)]"
+          >
+            Open
+            {action.count !== undefined && (
+              <span className="ml-1.5 rounded-full bg-white/20 px-1.5 text-[11px] tabular-nums">
+                {action.count}
+              </span>
+            )}
+          </motion.button>
+        ) : null}
+      </div>
+
+      {/* The standing counts, under the recommendation rather than above it —
+          they are context for the suggestion, not four more things to weigh up. */}
+      {line && <p className="mt-3 border-t border-line pt-2.5 text-[11.5px] text-subink">{line}</p>}
+    </motion.section>
+  );
+}
+
+// Your worst recall, wherever it lives.
+//
+// The canvas marks its own weak blocks, but one canvas at a time — so a fact you
+// keep failing in Macroeconomics is invisible while you are looking at Cold War.
+// Clicking a row opens that canvas *on that block*, because a list that only got
+// you to the right canvas would leave you doing the finding.
+function WeakestBlocks({ blocks, onOpen }) {
+  if (blocks.length === 0) return null;
+
+  return (
+    <section className="mt-6">
+      <h3 className="text-[11px] font-medium uppercase tracking-wide text-subink/80">
+        Where you’re weakest
+      </h3>
+      <p className="mt-0.5 text-[12px] text-subink">
+        Least of it came back last time you were asked, across every canvas.
+      </p>
+
+      <ul className="mt-2.5 divide-y divide-line overflow-hidden rounded-2xl border border-line bg-surface">
+        {blocks.map((block) => (
+          <li key={`${block.canvasId}:${block.blockId}`}>
+            <button
+              type="button"
+              onClick={() => onOpen(block.canvasId, block.blockId)}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-hover"
+            >
+              <span
+                aria-hidden="true"
+                className={`h-2 w-2 shrink-0 rounded-full ${
+                  block.fraction < 0.35 ? 'bg-danger' : 'bg-warn'
+                }`}
+              />
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-ink">
+                {block.label}
+              </span>
+              <span className="hidden min-w-0 max-w-[35%] truncate text-[11.5px] text-subink sm:block">
+                {block.canvasTitle}
+              </span>
+              <span className="shrink-0 text-[11.5px] tabular-nums text-subink">
+                {block.recalled}/{block.total}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
@@ -471,6 +585,26 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
   }, [refresh]);
 
   const owned = library.owned;
+  // Every owned canvas, measured once, for the summary above the grid. The
+  // server returns them most-recently-updated first and that order is load
+  // bearing — nextAction uses it to suggest the canvas you were last working on.
+  const measured = owned.map((canvas) => ({
+    id: canvas.id,
+    title: canvas.title,
+    ...progressFor(canvas),
+    due: dueFor(canvas),
+    weak: countMastery(canvas.nodes ?? [], reviews[canvas.id] ?? {}).weak,
+  }));
+  const totals = librarySummary(measured);
+  const action = nextAction(measured);
+  const weakest = weakestBlocks(
+    owned.map((canvas) => ({
+      id: canvas.id,
+      title: canvas.title,
+      nodes: canvas.nodes ?? [],
+      reviews: reviews[canvas.id] ?? {},
+    }))
+  );
   const shared = library.shared;
   const templates = listTemplates();
 
@@ -703,6 +837,12 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
             </motion.button>
           </div>
 
+          {/* Only on your own canvases, and not while searching: the totals are
+              about the library, and a filtered view is about the filter. */}
+          {tab === 'mine' && !searching && owned.length > 0 && (
+            <NextUp totals={totals} action={action} onOpen={onOpenCanvas} />
+          )}
+
           {loadError && (
             <div className="mt-5 rounded-2xl border border-danger/30 bg-danger-bg px-4 py-3">
               <p className="text-[13px] text-danger">{loadError}</p>
@@ -785,6 +925,10 @@ export default function Home({ user, onOpenCanvas, onSignOut, onUserChanged }) {
                 ))}
               </CardGrid>
             ))}
+
+          {/* Below the grid, not above it: the cards are what you came for, and
+              this is what to do once you have looked at them. */}
+          {tab === 'mine' && !searching && <WeakestBlocks blocks={weakest} onOpen={onOpenCanvas} />}
 
           {tab === 'shared' &&
             (sharedResults.length === 0 ? (

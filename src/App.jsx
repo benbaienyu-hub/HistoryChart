@@ -12,6 +12,10 @@ function App() {
   const [user, setUser] = useState(null);
   const [checking, setChecking] = useState(true);
   const [openCanvasId, setOpenCanvasId] = useState(null);
+  // A block to land on when the canvas opens. Set when you arrive from a link
+  // that named one — the weakest-blocks list on the home screen — so that
+  // clicking a block takes you to the block rather than to the general area.
+  const [focusBlockId, setFocusBlockId] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -36,13 +40,15 @@ function App() {
     };
   }, []);
 
-  function openCanvas(id) {
+  function openCanvas(id, blockId = null) {
     rememberOpenCanvas(user.email, id);
+    setFocusBlockId(blockId);
     setOpenCanvasId(id);
   }
 
   function closeCanvas() {
     rememberOpenCanvas(user.email, null);
+    setFocusBlockId(null);
     setOpenCanvasId(null);
   }
 
@@ -68,6 +74,7 @@ function App() {
       <Canvas
         user={user}
         canvasId={openCanvasId}
+        focusBlockId={focusBlockId}
         onExit={closeCanvas}
         onMissing={() => setOpenCanvasId(null)}
       />

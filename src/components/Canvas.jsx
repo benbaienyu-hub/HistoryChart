@@ -112,7 +112,7 @@ function makeEdge(sourceId, targetId) {
 
 // The editor proper. It is handed an already-loaded canvas so all of its state can
 // still be initialised synchronously — the loading lives in the wrapper below.
-function CanvasEditor({ user, record, onExit }) {
+function CanvasEditor({ user, record, focusBlockId = null, onExit }) {
   const canvasId = record.id;
   const isOwner = record.role === 'owner';
   // A 'view' grant can study a canvas but not change it, so nothing is persisted.
@@ -1087,6 +1087,22 @@ function CanvasEditor({ user, record, onExit }) {
     setDismissedGapIds((prev) => new Set(prev).add(gapId));
   }
 
+  // Arriving from a link that named a block — the weakest-blocks list on the home
+  // screen — should land on that block, not merely on the canvas containing it.
+  // Once, on the way in: re-running it would fight the person for control of the
+  // viewport every time anything on the page changed.
+  const landedRef = useRef(false);
+  useEffect(() => {
+    if (!focusBlockId || landedRef.current || !flowRef.current) return;
+    if (!nodes.some((n) => n.id === focusBlockId)) return;
+    landedRef.current = true;
+    // A beat, so React Flow has finished its own fitView on mount before this
+    // overrides it — otherwise the two animations race and it lands nowhere.
+    const timer = setTimeout(() => handleJumpToBlock(focusBlockId), 260);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusBlockId, nodes]);
+
   // Clicking the block name on a gap card brings it into view, which matters once
   // the canvas is bigger than the screen. Suggestions count: a missing gap's card
   // points at its ghost, which is somewhere out on the canvas by definition.
@@ -1609,7 +1625,7 @@ function CanvasEditor({ user, record, onExit }) {
 // Loads the canvas, then hands it to the editor. Splitting these apart keeps the
 // editor's state initialisation synchronous — it can read record.nodes directly
 // instead of every piece of state needing a "not loaded yet" case.
-export default function Canvas({ user, canvasId, onExit, onMissing }) {
+export default function Canvas({ user, canvasId, focusBlockId = null, onExit, onMissing }) {
   const [record, setRecord] = useState(null);
   const [problem, setProblem] = useState(null);
 
@@ -1653,5 +1669,13 @@ export default function Canvas({ user, canvasId, onExit, onMissing }) {
 
   // Keyed on the id so switching canvases remounts rather than trying to
   // reconcile one graph's state onto another's.
-  return <CanvasEditor key={record.id} user={user} record={record} onExit={onExit} />;
+  return (
+    <CanvasEditor
+      key={record.id}
+      user={user}
+      record={record}
+      focusBlockId={focusBlockId}
+      onExit={onExit}
+    />
+  );
 }
